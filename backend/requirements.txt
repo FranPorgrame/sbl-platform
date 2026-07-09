@@ -2,3 +2,6 @@ fastapi
 uvicorn[standard]
 pydantic
 ortools
+sqlalchemy
+psycopg[binary]
+python-dotenv
