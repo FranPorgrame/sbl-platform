@@ -12,7 +12,7 @@ import { Upload, Zap, RotateCcw, Trash2, RefreshCw, Server, Wifi, WifiOff } from
    Si el backend no responde, cae a un cálculo local de respaldo.
    ============================================================ */
 
-const BACKEND_DEFAULT = "http://localhost:8000";
+const BACKEND_DEFAULT = "https://sbl-platform-production.up.railway.app";
 
 // ---- Theme -------------------------------------------------
 const C = {
