@@ -116,11 +116,15 @@ const Card = ({ label, children, sub, accent }) => (
     {sub && <div style={{ color: C.dim, fontSize: 11, marginTop: 6 }}>{sub}</div>}
   </div>
 );
-const Field = ({ label, value, onChange, width = 110, placeholder }) => (
+const Field = ({ label, value, onChange, width = 110, placeholder, numeric }) => (
   <div>
-    <div style={{ color: C.dim, fontSize: 9, letterSpacing: 1.2, marginBottom: 6 }}>{label}</div>
-    <input value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)}
-      style={{ width, background: C.panelAlt, border: `1px solid ${C.line}`, color: C.text, fontFamily: MONO, fontSize: 13, padding: "8px 10px", outline: "none" }} />
+    <div style={{ /* ...igual... */ }}>{label}</div>
+    <input
+      value={numeric && value !== "" ? Number(value).toLocaleString('en-US') : value}
+      placeholder={placeholder}
+      onChange={(e) => onChange(numeric ? e.target.value.replace(/,/g, '') : e.target.value)}
+      style={{ width, /* ...igual... */ }}
+    />
   </div>
 );
 const Btn = ({ children, onClick, primary, disabled, icon: Icon }) => (
@@ -333,10 +337,10 @@ export default function App() {
 
           {/* Parameters */}
           <div style={{ background: C.panel, border: `1px solid ${C.line}`, padding: "16px 18px", marginBottom: 14, display: "flex", alignItems: "flex-end", gap: 16, flexWrap: "wrap" }}>
-            <Field label="LOAN VALUE (CHF)" value={loanValue} onChange={setLoanValue} width={150} />
+            <Field label="LOAN VALUE (CHF)" value={loanValue.toLocaleString('en-US')} onChange={setLoanValue} width={150} numeric/>
             <Field label="HAIRCUT %" value={haircut} onChange={setHaircut} width={70} />
             <Field label="ISSUER LIMIT %" value={issuerLimit} onChange={setIssuerLimit} width={80} />
-            <Field label="ABSOLUTE EXPOSURE LIMIT" value={absLimit} onChange={setAbsLimit} width={130} placeholder="none" />
+            <Field label="ABSOLUTE EXPOSURE LIMIT" value={absLimit} onChange={setAbsLimit} width={130} placeholder="none" numeric/>
             <Field label="MAX % OF SHARES" value={maxPct} onChange={setMaxPct} width={90} />
             <div>
               <div style={{ color: C.dim, fontSize: 9, letterSpacing: 1.2, marginBottom: 6 }}>LOT SIZE</div>
@@ -374,8 +378,8 @@ export default function App() {
                         <td style={{ padding: "12px 16px", textAlign: "right", color: C.dim }}>{fmt.price(l.price)}</td>
                         <td style={{ padding: "12px 16px", textAlign: "right" }}>{fmt.money(l.mv)}</td>
                         <td style={{ padding: "8px 16px", textAlign: "right" }}>
-                          {!ex && <input value={sh || ""} onChange={(e) => editProposed(l.id, e.target.value)}
-                            style={{ width: 96, textAlign: "right", background: C.panelAlt, border: `1px solid ${breach ? C.red : C.line}`, color: breach ? C.red : C.text, fontFamily: MONO, fontSize: 12.5, padding: "6px 8px", outline: "none" }} />}
+                          {!ex && <input value={sh ? Number(sh).toLocaleString('en-US') : ""} onChange={(e) => editProposed(l.id, e.target.value.replace(/,/g, ''))}
+                          style={{ width: 96, textAlign: "right", background: C.panelAlt, border: `1px solid ${breach ? C.red : C.line}`, color: breach ? C.red : C.text, fontFamily: MONO, fontSize: 12.5, padding: "6px 8px", outline: "none" }} />}
                         </td>
                         <td style={{ padding: "12px 16px", textAlign: "right", fontWeight: sh ? 600 : 400, color: sh ? C.text : C.dimmer }}>{sh ? fmt.money(sh * l.price) : "—"}</td>
                         <td style={{ padding: "12px 16px", textAlign: "right", color: pct > 90 ? C.amber : C.dim }}>{sh ? `${pct.toFixed(1)}%` : "—"}</td>
