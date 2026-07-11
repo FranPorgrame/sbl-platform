@@ -305,7 +305,7 @@ export default function App() {
           <div style={{ color: C.dim, fontSize: 12, marginBottom: 26 }}>Excel (.xlsx / .xls) or .csv · or click to browse</div>
           <div style={{ maxWidth: 520, margin: "0 auto", border: `1px solid ${C.line}`, padding: 18, textAlign: "left" }}>
             <div style={{ color: C.dimmer, fontSize: 9, letterSpacing: 1.5, marginBottom: 10 }}>EXPECTED COLUMNS</div>
-            <div style={{ fontSize: 12.5, color: C.text }}>Security name · ISIN · Quantity · Price · Market value</div>
+            <div style={{ fontSize: 12.5, color: C.text }}>Security · ISIN · Quantity · Price</div>
             <div style={{ color: C.dim, fontSize: 11, marginTop: 10 }}>Positive quantities are treated as long collateral; negative quantities as the short (borrowing) book.</div>
           </div>
           {error && <div style={{ color: C.red, fontSize: 12, marginTop: 18 }}>{error}</div>}
