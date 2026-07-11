@@ -342,9 +342,7 @@ export default function App() {
             <Field label="ISSUER LIMIT %" value={issuerLimit} onChange={setIssuerLimit} width={80} />
             <Field label="ABSOLUTE EXPOSURE LIMIT" value={absLimit} onChange={setAbsLimit} width={130} placeholder="none" numeric/>
             </div>
-            <div style={{ background: C.panel, border: `1px solid ${C.line}`, padding: "16px 18px", display: "flex", alignItems: "flex-end", gap: 18 }}>
-            </div>
-            <div style={{ background: C.panel, border: `1px solid ${C.line}`, padding: "16px 18px", display: "flex", alignItems: "flex-end", gap: 18 }}>
+            <div style={{ background: C.panel, border: `1px solid ${C.line}`, padding: "16px 18px", display: "flex", alignItems: "flex-end", gap: 18, flex: 1 }}>
             <Field label="MAX % OF SHARES" value={maxPct} onChange={setMaxPct} width={90} />
             <div>
               <div style={{ color: C.dim, fontSize: 9, letterSpacing: 1.2, marginBottom: 6 }}>LOT SIZE</div>
