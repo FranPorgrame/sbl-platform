@@ -192,7 +192,8 @@ export default function App() {
 
   const loadSample = () => {
     setRows(rowsFromSample()); setFilename(SAMPLE.filename); setCcy("CHF");
-    setLoanValue(String(SAMPLE.loanValue)); setHaircut(String(SAMPLE.haircut));
+    const gs = SAMPLE.positions.filter((p) => p[2] < 0).reduce((a, p) => a + Math.abs(p[2]) * p[3], 0);
+    setLoanValue(String(Math.round(gs * 100) / 100));
     setIssuerLimit(String(SAMPLE.issuerLimit)); setAbsLimit(SAMPLE.absLimit);
     setMaxPct(String(SAMPLE.maxPct)); setLot(SAMPLE.lot);
     setProposals({}); setExcluded(new Set()); setError(""); setEngine("idle");
