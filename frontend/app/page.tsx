@@ -172,8 +172,8 @@ export default function App() {
   const totalMV = useMemo(() => rows.reduce((a, r) => a + Math.abs(r.qty) * r.price, 0), [rows]);
   const needed = params.loanValue * (1 + params.haircut / 100);
   const provided = useMemo(() => longs.reduce((a, l) => a + (proposals[l.id] || 0) * l.price, 0), [longs, proposals]);
-  const exposure = provided - params.loanValue;
-  const marginPct = params.loanValue > 0 ? (exposure / params.loanValue) * 100 : 0;
+  const exposure = provided - needed;
+  const marginPct = needed > 0 ? (exposure / needed) * 100 : 0;
 
   const loadRows = (data, name) => {
     const mapped = data.map((r, i) => {
