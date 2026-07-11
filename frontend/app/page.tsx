@@ -351,7 +351,7 @@ export default function App() {
               </div>
             </div>
             <div style={{ flex: 1 }} />
-            <Btn primary icon={Zap} onClick={autoPropose} disabled={engine === "loading"}>Auto-propose</Btn>
+            <Btn primary icon={Zap} onClick={autoPropose} disabled={engine === "loading"}>Optimize</Btn>
             <Btn icon={RotateCcw} onClick={reset}>Reset</Btn>
           </div>
 
