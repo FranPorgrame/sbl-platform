@@ -289,7 +289,7 @@ export default function App() {
             {["CHF", "EUR", "USD", "GBP"].map((c) => <option key={c}>{c}</option>)}
           </select>
           {hasData
-            ? <><Btn icon={RefreshCw} onClick={() => fileRef.current?.click()}>Replace</Btn><Btn icon={Trash2} onClick={clearAll}>Clear</Btn></>
+            ? <><Btn icon={RefreshCw} onClick={() => fileRef.current?.click()}>Replace</Btn><Btn icon={Trash2} onClick={clearAll}>Close</Btn></>
             : <Btn onClick={loadSample}>Load sample</Btn>}
         </div>
       </div>
