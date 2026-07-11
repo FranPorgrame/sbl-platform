@@ -315,7 +315,7 @@ export default function App() {
         <>
           <div style={{ display: "flex", gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
             <Card label="TOTAL MARKET VALUE">{fmt.money(totalMV)}</Card>
-            <Card label="TOTAL BORROWING / LOAN VALUE" accent={C.text}>{fmt.money(-grossShort)}</Card>
+            <Card label="TOTAL BORROWING" accent={C.text}>{fmt.money(grossShort)}</Card>
             <Card label="TOTAL COLLATERAL" accent={covered ? C.green : C.amber} sub={`Needed ${fmt.money(needed)}`}>{fmt.money(provided)}</Card>
             <Card label="COLLATERAL EXPOSURE" accent={exposure >= 0 ? C.green : C.red} sub={`${marginPct.toFixed(1)}% margin · ${exposure >= 0 ? "in favour of lender" : "shortfall"}`}>{fmt.money(exposure, true)}</Card>
           </div>
@@ -337,7 +337,6 @@ export default function App() {
 
           {/* Parameters */}
           <div style={{ background: C.panel, border: `1px solid ${C.line}`, padding: "16px 18px", marginBottom: 14, display: "flex", alignItems: "flex-end", gap: 16, flexWrap: "wrap" }}>
-            <Field label="LOAN VALUE (CHF)" value={loanValue.toLocaleString('en-US')} onChange={setLoanValue} width={150} numeric/>
             <Field label="HAIRCUT %" value={haircut} onChange={setHaircut} width={70} />
             <Field label="ISSUER LIMIT %" value={issuerLimit} onChange={setIssuerLimit} width={80} />
             <Field label="ABSOLUTE EXPOSURE LIMIT" value={absLimit} onChange={setAbsLimit} width={130} placeholder="none" numeric/>
