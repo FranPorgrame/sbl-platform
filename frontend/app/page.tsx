@@ -367,7 +367,7 @@ export default function App() {
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
                 <thead><tr style={{ color: C.dim, fontSize: 9, letterSpacing: 1 }}>
-                  {["SECURITY", "ISIN", "QTY TOTAL", "PRICE", "MARKET VALUE", "PROPOSED SHS", "PROPOSED MV", "% POS", "% COLL", "ACTION"].map((h, i) => (
+                  {["SECURITY", "ISIN", "QTY TOTAL", "PRICE", "MARKET VALUE", "PROPOSED TRANSACTIONS", "PROPOSED MV", "% POS", "% COLL", "ACTION"].map((h, i) => (
                     <th key={h} style={{ textAlign: i < 2 ? "left" : "right", padding: "10px 16px", fontWeight: 400, whiteSpace: "nowrap" }}>{h}</th>))}
                 </tr></thead>
                 <tbody>
