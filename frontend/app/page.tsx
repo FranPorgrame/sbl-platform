@@ -173,7 +173,9 @@ export default function App() {
   const needed = params.loanValue * (1 + params.haircut / 100);
   const provided = useMemo(() => longs.reduce((a, l) => a + (proposals[l.id] || 0) * l.price, 0), [longs, proposals]);
   const exposure = provided - needed;
-  const marginPct = needed > 0 ? (exposure / needed) * 100 : 0;
+  const exposureLabel = params.absLimit > 0
+    ? (exposure < -params.absLimit ? "shortfall" : exposure > params.absLimit ? "excess" : null)
+    : null;
 
   const loadRows = (data, name) => {
     const mapped = data.map((r, i) => {
@@ -318,7 +320,7 @@ export default function App() {
             <Card label="TOTAL MARKET VALUE">{fmt.money(totalMV)}</Card>
             <Card label="TOTAL BORROWING" accent={C.text}>{fmt.money(grossShort)}</Card>
             <Card label="TOTAL COLLATERAL" accent={covered ? C.green : C.amber} sub={`Needed ${fmt.money(needed)}`}>{fmt.money(provided)}</Card>
-            <Card label="COLLATERAL EXPOSURE" accent={exposure >= 0 ? C.green : C.red} sub={`${marginPct.toFixed(1)}% margin · ${exposure >= 0 ? "in favour of lender" : "shortfall"}`}>{fmt.money(exposure, true)}</Card>
+            <Card label="COLLATERAL EXPOSURE" accent={exposure >= 0 ? C.green : C.red} sub={exposureLabel}>{fmt.money(exposure, true)}</Card>
           </div>
 
           {/* Backend connection bar */}
