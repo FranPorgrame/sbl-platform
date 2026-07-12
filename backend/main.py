@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from models import OptimizeRequest, OptimizeResponse
-from optimizer import optimize as run_optimizer
+from optimizer import optimize as run_optimizer, check_exposure_breach
 import db
 
 app = FastAPI(
@@ -34,6 +34,11 @@ def health() -> dict:
 def optimize(req: OptimizeRequest) -> OptimizeResponse:
     result = run_optimizer(req)
     r = req.rules
+
+    breach, exposure = check_exposure_breach(result, r)
+    result.exposure_breach = breach
+    result.collateral_exposure = round(exposure, 2)
+
     saved_id = db.save_optimization(
         rules={
             "loan_value": r.loan_value,

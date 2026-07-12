@@ -25,7 +25,11 @@ class Rules(BaseModel):
     loan_value: float = Field(ge=0)
     haircut_pct: float = Field(ge=0, description="Margen de sobre-cobertura sobre el loan")
     issuer_limit_pct: float = Field(ge=0, le=100, description="Máx % del colateral necesario por emisor")
-    absolute_exposure_limit: float | None = Field(default=None, ge=0)
+    absolute_exposure_limit: float | None = Field(
+        default=None, ge=0,
+        description="Umbral de alerta post-optimización sobre el Collateral Exposure "
+                    "(Total Collateral provisto - Needed). Ya NO limita al solver.",
+    )
     max_pct_of_shares: float = Field(default=100, ge=0, le=100)
     lot_size: int = Field(default=1, ge=1)
     existing_collateral: float = Field(default=0, ge=0)
@@ -51,3 +55,5 @@ class OptimizeResponse(BaseModel):
     collateral_provided: float
     excess: float
     proposal: list[ProposedLine]
+    collateral_exposure: float = 0.0
+    exposure_breach: bool = False

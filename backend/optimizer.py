@@ -15,9 +15,12 @@ Objetivo:
 Sujeto a:
     (cobertura)   sum_i (shares_i * price_i)          >= needed
     (emisor)      shares_i * price_i                   <= issuer_cap
-    (absoluto)    shares_i * price_i                   <= abs_cap
     (max shares)  shares_i                             <= max_pct * owned_i
     (lote)        shares_i = lots_i * lot_size,  lots_i entero
+
+absolute_exposure_limit ya NO es una restricción del solver: es un umbral de
+alerta post-optimización, evaluado por check_exposure_breach() sobre el
+resultado ya calculado.
 """
 from __future__ import annotations
 
@@ -34,7 +37,6 @@ def optimize(req: OptimizeRequest) -> OptimizeResponse:
     needed = max(0.0, needed_gross - r.existing_collateral)
 
     issuer_cap = (r.issuer_limit_pct / 100) * needed_gross if r.issuer_limit_pct > 0 else None
-    abs_cap = r.absolute_exposure_limit
     lot = r.lot_size
 
     solver = pywraplp.Solver.CreateSolver("CBC")
@@ -47,8 +49,6 @@ def optimize(req: OptimizeRequest) -> OptimizeResponse:
         caps_shares = [p.quantity * (r.max_pct_of_shares / 100)]
         if issuer_cap is not None:
             caps_shares.append(issuer_cap / p.price)
-        if abs_cap is not None:
-            caps_shares.append(abs_cap / p.price)
         max_shares = min(caps_shares)
         max_lots = int(max_shares // lot)
         if max_lots <= 0:
@@ -106,3 +106,16 @@ def optimize(req: OptimizeRequest) -> OptimizeResponse:
         excess=round(provided - needed, 2),
         proposal=proposal,
     )
+
+
+def check_exposure_breach(result: OptimizeResponse, rules) -> tuple[bool, float]:
+    """Evalúa el Collateral Exposure del resultado ya optimizado contra el AEL.
+
+    Collateral Exposure = Total Collateral provisto - Needed. No modifica
+    el resultado del optimizer de ninguna manera, solo evalúa y reporta.
+    """
+    exposure = result.collateral_provided - result.collateral_needed
+    if rules.absolute_exposure_limit is None:
+        return False, exposure
+    breach = abs(exposure) > rules.absolute_exposure_limit
+    return breach, exposure
