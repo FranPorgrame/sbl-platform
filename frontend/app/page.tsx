@@ -364,7 +364,7 @@ export default function App() {
           {/* Long book */}
           <div style={{ background: C.panel, border: `1px solid ${C.line}`, marginBottom: 14 }}>
             <div style={{ display: "flex", justifyContent: "space-between", padding: "12px 16px", borderBottom: `1px solid ${C.line}`, color: C.dim, fontSize: 10, letterSpacing: 1.5 }}>
-              <span>COLLATERAL PROPOSAL — LONG BOOK</span><span>Proposed {fmt.money(provided)} / required {fmt.money(needed)}</span>
+              <span>LONG POSITIONS</span><span>Proposed {fmt.money(provided)} / required {fmt.money(needed)}</span>
             </div>
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
@@ -404,7 +404,7 @@ export default function App() {
           {/* Short book */}
           <div style={{ background: C.panel, border: `1px solid ${C.line}` }}>
             <div style={{ display: "flex", justifyContent: "space-between", padding: "12px 16px", borderBottom: `1px solid ${C.line}`, color: C.dim, fontSize: 10, letterSpacing: 1.5 }}>
-              <span>BORROWING — SHORT BOOK</span><span>Gross {fmt.money(grossShort)}</span>
+              <span>SHORT POSITIONS</span><span>Gross {fmt.money(grossShort)}</span>
             </div>
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
