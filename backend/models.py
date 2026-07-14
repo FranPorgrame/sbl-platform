@@ -62,6 +62,15 @@ class ProposedLine(BaseModel):
     pct_of_position: float
 
 
+
+class ProposedTransaction(BaseModel):
+    name: str
+    isin: str
+    action: str  # "recall" o "pledge"
+    shares: int
+    market_value: float
+
+
 class OptimizeResponse(BaseModel):
     status: str                       # OPTIMAL | FEASIBLE | INFEASIBLE
     collateral_needed: float
@@ -70,3 +79,5 @@ class OptimizeResponse(BaseModel):
     proposal: list[ProposedLine]
     collateral_exposure: float = 0.0
     exposure_breach: bool = False
+    proposed_transactions: list[ProposedTransaction] = []
+    fully_resolved: bool = True

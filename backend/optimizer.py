@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from ortools.linear_solver import pywraplp
 
-from models import OptimizeRequest, OptimizeResponse, ProposedLine
+from models import OptimizeRequest, OptimizeResponse, ProposedLine, ProposedTransaction
 
 
 def optimize(req: OptimizeRequest) -> OptimizeResponse:
@@ -125,3 +125,149 @@ def check_exposure_breach(result: OptimizeResponse, rules) -> tuple[bool, float]
         return False, exposure
     breach = abs(exposure) > rules.absolute_exposure_limit
     return breach, exposure
+
+
+
+import math
+
+class NoValidBreachResolutionError(Exception):
+    """No se encontró ninguna combinación de recall que resuelva
+    el AEL breach sin generar un nuevo issuer limit breach."""
+    pass
+
+
+def check_issuer_limit_post_recall(proposal: list, transactions: list["ProposedTransaction"]) -> dict[str, float]:
+    """Simula el proposal después de aplicar las transactions y devuelve
+    el % de cada ISIN restante sobre el nuevo total pledgeado."""
+    recalled_by_isin = {t.isin: t.shares for t in transactions}
+
+    remaining_mv_by_isin = {}
+    for position in proposal:
+        recalled_shares = recalled_by_isin.get(position.isin, 0)
+        remaining_shares = position.proposed_shares - recalled_shares
+        if remaining_shares <= 0:
+            continue
+        price_per_share = position.proposed_mv / position.proposed_shares
+        remaining_mv_by_isin[position.isin] = remaining_shares * price_per_share
+
+    new_total = sum(remaining_mv_by_isin.values())
+    if new_total == 0:
+        return {}
+
+    return {isin: (mv / new_total) * 100 for isin, mv in remaining_mv_by_isin.items()}
+
+
+def _greedy_recall(proposal, min_recall, max_recall, lot_size):
+    sorted_proposal = sorted(proposal, key=lambda p: p.proposed_mv, reverse=True)
+    transactions = []
+    recalled_so_far = 0.0
+
+    for position in sorted_proposal:
+        if recalled_so_far >= min_recall:
+            break
+        if position.proposed_shares == 0:
+            continue
+
+        price_per_share = position.proposed_mv / position.proposed_shares
+        lot_value = price_per_share * lot_size
+        if lot_value == 0:
+            continue
+
+        remaining_room = max_recall - recalled_so_far
+        max_lots_here = min(
+            position.proposed_shares // lot_size,
+            int(remaining_room // lot_value),
+        )
+        lots_needed = math.ceil((min_recall - recalled_so_far) / lot_value)
+        lots_to_recall = min(max_lots_here, max(lots_needed, 1))
+
+        if lots_to_recall <= 0:
+            continue
+
+        shares_to_recall = lots_to_recall * lot_size
+        mv_to_recall = shares_to_recall * price_per_share
+
+        transactions.append(ProposedTransaction(
+            name=position.name, isin=position.isin, action="recall",
+            shares=shares_to_recall, market_value=round(mv_to_recall, 2),
+        ))
+        recalled_so_far += mv_to_recall
+
+    return transactions, recalled_so_far
+
+
+def _proportional_recall(proposal, min_recall, max_recall, lot_size):
+    total_mv = sum(p.proposed_mv for p in proposal if p.proposed_shares > 0)
+    if total_mv == 0:
+        return [], 0.0
+
+    target = (min_recall + max_recall) / 2
+    transactions = []
+    recalled_so_far = 0.0
+
+    for position in proposal:
+        if position.proposed_shares == 0:
+            continue
+        price_per_share = position.proposed_mv / position.proposed_shares
+        lot_value = price_per_share * lot_size
+        if lot_value == 0:
+            continue
+
+        share_of_target = target * (position.proposed_mv / total_mv)
+        lots_to_recall = min(
+            position.proposed_shares // lot_size,
+            round(share_of_target / lot_value),
+        )
+        if lots_to_recall <= 0:
+            continue
+
+        shares_to_recall = lots_to_recall * lot_size
+        mv_to_recall = shares_to_recall * price_per_share
+
+        transactions.append(ProposedTransaction(
+            name=position.name, isin=position.isin, action="recall",
+            shares=shares_to_recall, market_value=round(mv_to_recall, 2),
+        ))
+        recalled_so_far += mv_to_recall
+
+    return transactions, recalled_so_far
+
+
+def propose_breach_resolution(
+    proposal: list,
+    collateral_exposure: float,
+    absolute_exposure_limit: float,
+    lot_size: int,
+    issuer_limit_pct: float,
+) -> tuple[list["ProposedTransaction"], bool]:
+    min_recall = collateral_exposure - absolute_exposure_limit
+    max_recall = collateral_exposure
+
+    no_transactions_found = True
+    issuer_breach_found = False
+
+    for strategy in (_greedy_recall, _proportional_recall):
+        transactions, recalled_so_far = strategy(proposal, min_recall, max_recall, lot_size)
+        fully_resolved = recalled_so_far >= min_recall
+
+        if not transactions:
+            continue
+
+        no_transactions_found = False
+        issuer_pcts = check_issuer_limit_post_recall(proposal, transactions)
+        issuer_breach = any(pct > issuer_limit_pct for pct in issuer_pcts.values())
+
+        if not issuer_breach:
+            return transactions, fully_resolved
+
+        issuer_breach_found = True
+
+    if no_transactions_found:
+        raise NoValidBreachResolutionError(
+            "No se pudo generar ninguna transacción de recall: el excedente a recuperar "
+            "es menor al valor de un lote mínimo de cualquier posición disponible."
+        )
+    raise NoValidBreachResolutionError(
+        "No se encontró ninguna combinación de recall que resuelva el AEL breach "
+        "sin generar un nuevo issuer limit breach."
+    )

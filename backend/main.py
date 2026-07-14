@@ -5,11 +5,16 @@ import json
 from dotenv import load_dotenv
 load_dotenv()
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from models import OptimizeRequest, OptimizeResponse
-from optimizer import optimize as run_optimizer, check_exposure_breach
+from models import OptimizeRequest, OptimizeResponse, ProposedTransaction
+from optimizer import (
+    optimize as run_optimizer,
+    check_exposure_breach,
+    propose_breach_resolution,
+    NoValidBreachResolutionError,
+)
 import db
 
 app = FastAPI(
@@ -31,6 +36,11 @@ def health() -> dict:
     return {"status": "ok", "persistence": db.persistence_enabled()}
 
 
+@app.get("/history")
+def history(limit: int = 20) -> dict:
+    return {"history": db.list_history(limit)}
+
+
 @app.post("/optimize", response_model=OptimizeResponse)
 def optimize(req: OptimizeRequest) -> OptimizeResponse:
     result = run_optimizer(req)
@@ -39,6 +49,20 @@ def optimize(req: OptimizeRequest) -> OptimizeResponse:
     breach, exposure = check_exposure_breach(result, r)
     result.exposure_breach = breach
     result.collateral_exposure = round(exposure, 2)
+
+    proposed_transactions: list[ProposedTransaction] = []
+    fully_resolved = True
+
+    if breach:
+        try:
+            proposed_transactions, fully_resolved = propose_breach_resolution(
+                result.proposal, exposure, r.absolute_exposure_limit, r.lot_size, r.issuer_limit_pct
+            )
+        except NoValidBreachResolutionError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+
+    result.proposed_transactions = proposed_transactions
+    result.fully_resolved = fully_resolved
 
     saved_id = db.save_optimization(
         rules={
@@ -54,8 +78,3 @@ def optimize(req: OptimizeRequest) -> OptimizeResponse:
     )
     print(f"[API] /optimize done — status={result.status} saved_id={saved_id}", flush=True)
     return result
-
-
-@app.get("/history")
-def history(limit: int = 20) -> dict:
-    return {"history": db.list_history(limit)}
