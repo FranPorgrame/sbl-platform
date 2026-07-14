@@ -33,8 +33,14 @@ def optimize(req: OptimizeRequest) -> OptimizeResponse:
     r = req.rules
     longs = [p for p in req.positions if p.quantity > 0]
 
+    price_by_isin = {p.isin: p.price for p in req.positions}
+    existing_collateral_value = sum(
+        shares * price_by_isin[isin]
+        for isin, shares in r.existing_collateral.items()
+    )
+
     needed_gross = r.loan_value * (1 + r.haircut_pct / 100)
-    needed = max(0.0, needed_gross - r.existing_collateral)
+    needed = max(0.0, needed_gross - existing_collateral_value)
 
     issuer_cap = (r.issuer_limit_pct / 100) * needed_gross if r.issuer_limit_pct > 0 else None
     lot = r.lot_size

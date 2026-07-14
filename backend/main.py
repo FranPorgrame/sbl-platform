@@ -1,5 +1,6 @@
 """SBL Platform — API (FastAPI). Con registro del guardado en logs."""
 from __future__ import annotations
+import json
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -47,7 +48,7 @@ def optimize(req: OptimizeRequest) -> OptimizeResponse:
             "absolute_exposure_limit": r.absolute_exposure_limit,
             "max_pct_of_shares": r.max_pct_of_shares,
             "lot_size": r.lot_size,
-            "existing_collateral": r.existing_collateral,
+            "existing_collateral": json.dumps(r.existing_collateral),
         },
         result=result.model_dump(),
     )

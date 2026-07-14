@@ -32,13 +32,26 @@ class Rules(BaseModel):
     )
     max_pct_of_shares: float = Field(default=100, ge=0, le=100)
     lot_size: int = Field(default=1, ge=1)
-    existing_collateral: float = Field(default=0, ge=0)
+    existing_collateral: dict[str, int] = Field(default_factory=dict)
 
+
+from pydantic import BaseModel, model_validator
 
 class OptimizeRequest(BaseModel):
     positions: list[Position]
     rules: Rules
     currency: str = "CHF"
+
+    @model_validator(mode="after")
+    def validate_existing_collateral_isins(self):
+        portfolio_isins = {p.isin for p in self.positions}
+        missing = set(self.rules.existing_collateral.keys()) - portfolio_isins
+        if missing:
+            raise ValueError(
+                f"Existing collateral contiene ISIN(s) sin match en el portfolio: "
+                f"{', '.join(sorted(missing))}. Subí un Excel con ISIN correcto."
+            )
+        return self
 
 
 class ProposedLine(BaseModel):

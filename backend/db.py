@@ -58,8 +58,8 @@ def save_optimization(rules: dict, result: dict) -> int | None:
                          lot_size, existing_collateral)
                     VALUES
                         (:loan_value, :haircut_pct, :issuer_limit_pct,
-                         :absolute_exposure_limit, :max_pct_of_shares,
-                         :lot_size, :existing_collateral)
+                        :absolute_exposure_limit, :max_pct_of_shares,
+                        :lot_size, CAST(:existing_collateral AS JSONB))
                     RETURNING id
                     """
                 ),
@@ -71,10 +71,12 @@ def save_optimization(rules: dict, result: dict) -> int | None:
                     """
                     INSERT INTO optimization_results
                         (rules_id, status, collateral_needed,
-                         collateral_provided, excess, proposal)
+                         collateral_provided, excess, proposal,
+                         collateral_exposure, exposure_breach)
                     VALUES
                         (:rules_id, :status, :collateral_needed,
-                         :collateral_provided, :excess, CAST(:proposal AS JSONB))
+                         :collateral_provided, :excess, CAST(:proposal AS JSONB),
+                         :collateral_exposure, :exposure_breach)
                     RETURNING id
                     """
                 ),
@@ -85,6 +87,8 @@ def save_optimization(rules: dict, result: dict) -> int | None:
                     "collateral_provided": result["collateral_provided"],
                     "excess": result["excess"],
                     "proposal": json.dumps(result["proposal"]),
+                    "collateral_exposure": result["collateral_exposure"],
+                    "exposure_breach": result["exposure_breach"],
                 },
             ).scalar_one()
         print(f"[DB] save_optimization OK — result_id={result_id}", flush=True)
