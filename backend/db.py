@@ -114,6 +114,8 @@ def save_breach_execution(
     if engine is None:
         print("[DB] save_breach_execution skipped — no engine", flush=True)
         return None
+    rules = dict(rules)
+    rules["existing_collateral"] = json.dumps(rules.get("existing_collateral", {}))
     try:
         with engine.begin() as conn:
             rules_id = conn.execute(
@@ -167,7 +169,7 @@ def save_breach_execution(
         print(f"[DB] save_breach_execution FAILED: {e}", flush=True)
         traceback.print_exc()
         return None
-
+    
 def list_history(limit: int = 20) -> list[dict]:
     engine = get_engine()
     if engine is None:
