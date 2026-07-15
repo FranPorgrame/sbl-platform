@@ -79,6 +79,7 @@ def optimize(req: OptimizeRequest) -> OptimizeResponse:
         result=result.model_dump(),
     )
     print(f"[API] /optimize done — status={result.status} saved_id={saved_id}", flush=True)
+    result.id = saved_id
     return result
 
 

@@ -72,6 +72,7 @@ class ProposedTransaction(BaseModel):
 
 
 class OptimizeResponse(BaseModel):
+    id: int | None = None
     status: str                       # OPTIMAL | FEASIBLE | INFEASIBLE
     collateral_needed: float
     collateral_provided: float
