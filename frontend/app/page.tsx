@@ -158,6 +158,10 @@ export default function App() {
   const [engine, setEngine] = useState("idle"); // idle | loading | backend | local | error
   const [engineMsg, setEngineMsg] = useState("");
 
+  const [breachInfo, setBreachInfo] = useState(null);
+  const [executingBreach, setExecutingBreach] = useState(false);
+  const [breachError, setBreachError] = useState("");
+  
   const fmt = useFmt(ccy);
 
   const params = useMemo(() => ({
@@ -244,11 +248,76 @@ export default function App() {
       setProposals(next);
       setEngine("backend");
       setEngineMsg(`${data.status} · excess ${fmt.money(data.excess)}`);
+
+      setBreachInfo({
+        optimizationId: data.id,
+        exposureBreach: data.exposure_breach,
+        proposedTransactions: data.proposed_transactions || [],
+        fullyResolved: data.fully_resolved,
+        collateralNeeded: data.collateral_needed,
+        collateralProvided: data.collateral_provided,
+        exposure: data.collateral_exposure,
+      });
+      setBreachError("");
     } catch (e) {
       // Fallback: local engine so the demo never dies.
       setProposals(optimizeLocal(longs, excluded, params));
       setEngine("local");
       setEngineMsg(e.name === "AbortError" ? "backend timeout" : "backend unreachable");
+      setBreachInfo(null);
+    }
+  };
+
+    const executeBreach = async () => {
+    if (!breachInfo) return;
+    setExecutingBreach(true);
+    setBreachError("");
+    try {
+      const payload = {
+        optimization_id: breachInfo.optimizationId,
+        rules: {
+          loan_value: params.loanValue,
+          haircut_pct: params.haircut,
+          issuer_limit_pct: params.issuerLimit,
+          absolute_exposure_limit: params.absLimit > 0 ? params.absLimit : null,
+          max_pct_of_shares: params.maxPct,
+          lot_size: params.lot,
+          existing_collateral: {},
+        },
+        applied_transactions: breachInfo.proposedTransactions,
+        collateral_needed: breachInfo.collateralNeeded,
+        collateral_provided: breachInfo.collateralProvided,
+      };
+      const res = await fetch(`${backendUrl}/execute-breach-resolution`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+
+      setProposals((prev) => {
+      const next = { ...prev };
+      for (const t of breachInfo.proposedTransactions) {
+        const row = longs.find((l) => l.isin === t.isin);
+        if (row) {
+          const current = next[row.id] || 0;
+          next[row.id] = Math.max(0, current - t.shares);
+        }
+      }
+      return next;
+    });
+
+      setBreachInfo((b) => ({
+        ...b,
+        exposureBreach: false,
+        collateralProvided: data.collateral_provided,
+        exposure: data.collateral_exposure,
+      }));
+    } catch (e) {
+      setBreachError("No se pudo ejecutar la resolución del breach.");
+    } finally {
+      setExecutingBreach(false);
     }
   };
 
@@ -337,6 +406,46 @@ export default function App() {
               {engine === "idle" && "ready"}
             </div>
           </div>
+          
+          {breachInfo?.exposureBreach && (
+          <div style={{ background: "#2a1414", border: `1px solid ${C.red}`, padding: "14px 18px", marginBottom: 14 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <span style={{ color: C.red, fontSize: 12, letterSpacing: 1 }}>
+                AEL BREACH — exposure {fmt.money(breachInfo.exposure, true)}
+              </span>
+              {!breachInfo.fullyResolved && (
+                <span style={{ color: C.amber, fontSize: 10 }}>Resolución parcial</span>
+              )}
+            </div>
+            <table style={{ width: "100%", fontSize: 12, marginBottom: 12 }}>
+              <thead><tr style={{ color: C.dim, fontSize: 9 }}>
+                <th style={{ textAlign: "left", padding: "4px 8px" }}>SECURITY</th>
+                <th style={{ textAlign: "left", padding: "4px 8px" }}>ISIN</th>
+                <th style={{ textAlign: "right", padding: "4px 8px" }}>ACTION</th>
+                <th style={{ textAlign: "right", padding: "4px 8px" }}>SHARES</th>
+                <th style={{ textAlign: "right", padding: "4px 8px" }}>MARKET VALUE</th>
+              </tr></thead>
+              <tbody>
+                {breachInfo.proposedTransactions.map((t, i) => (
+                  <tr key={i} style={{ borderTop: `1px solid ${C.lineSoft}` }}>
+                    <td style={{ padding: "6px 8px" }}>{t.name}</td>
+                    <td style={{ padding: "6px 8px", color: C.dim }}>{t.isin}</td>
+                    <td style={{ padding: "6px 8px", textAlign: "right" }}>{t.action}</td>
+                    <td style={{ padding: "6px 8px", textAlign: "right" }}>{fmt.int(t.shares)}</td>
+                    <td style={{ padding: "6px 8px", textAlign: "right" }}>{fmt.money(t.market_value)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <Btn primary onClick={executeBreach} disabled={executingBreach}>
+                {executingBreach ? "Ejecutando…" : "Ejecutar"}
+              </Btn>
+              <Btn disabled>Again</Btn>
+              {breachError && <span style={{ color: C.red, fontSize: 11 }}>{breachError}</span>}
+            </div>
+          </div>
+        )}
 
           {/* Parameters */}
           <div style={{ marginBottom: 14, display: "flex", alignItems: "stretch", gap: 12 }}>
