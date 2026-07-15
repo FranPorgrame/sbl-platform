@@ -17,11 +17,13 @@ from optimizer import (
 )
 import db
 
+
 app = FastAPI(
     title="SBL Platform API",
     description="Securities Borrowing and Lending — collateral optimization",
     version="0.3.0",
 )
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -78,3 +80,22 @@ def optimize(req: OptimizeRequest) -> OptimizeResponse:
     )
     print(f"[API] /optimize done — status={result.status} saved_id={saved_id}", flush=True)
     return result
+
+
+@app.post("/execute-breach-resolution")
+def execute_breach_resolution(req: ExecuteBreachRequest):
+    recalled_value = sum(t.market_value for t in req.applied_transactions)
+    new_provided = req.collateral_provided - recalled_value
+    new_exposure = new_provided - req.collateral_needed
+
+    result_id = db.save_breach_execution(
+        rules=req.rules,
+        applied_transactions=[t.model_dump() for t in req.applied_transactions],
+        resolved_optimization_id=req.optimization_id,
+        collateral_needed=req.collateral_needed,
+        collateral_provided=new_provided,
+        collateral_exposure=new_exposure,
+    )
+    if result_id is None:
+        raise HTTPException(status_code=500, detail="No se pudo guardar la ejecución del breach.")
+    return {"result_id": result_id, "collateral_provided": new_provided, "collateral_exposure": new_exposure}

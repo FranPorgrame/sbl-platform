@@ -72,11 +72,13 @@ def save_optimization(rules: dict, result: dict) -> int | None:
                     INSERT INTO optimization_results
                         (rules_id, status, collateral_needed,
                          collateral_provided, excess, proposal,
-                         collateral_exposure, exposure_breach)
+                         collateral_exposure, exposure_breach,
+                         proposed_transactions, fully_resolved)
                     VALUES
                         (:rules_id, :status, :collateral_needed,
                          :collateral_provided, :excess, CAST(:proposal AS JSONB),
-                         :collateral_exposure, :exposure_breach)
+                         :collateral_exposure, :exposure_breach,
+                         CAST(:proposed_transactions AS JSONB), :fully_resolved)
                     RETURNING id
                     """
                 ),
@@ -89,6 +91,8 @@ def save_optimization(rules: dict, result: dict) -> int | None:
                     "proposal": json.dumps(result["proposal"]),
                     "collateral_exposure": result["collateral_exposure"],
                     "exposure_breach": result["exposure_breach"],
+                    "proposed_transactions": json.dumps(result["proposed_transactions"]),
+                    "fully_resolved": result["fully_resolved"],
                 },
             ).scalar_one()
         print(f"[DB] save_optimization OK — result_id={result_id}", flush=True)
@@ -98,6 +102,71 @@ def save_optimization(rules: dict, result: dict) -> int | None:
         traceback.print_exc()
         return None
 
+def save_breach_execution(
+    rules: dict,
+    applied_transactions: list[dict],
+    resolved_optimization_id: int,
+    collateral_needed: float,
+    collateral_provided: float,
+    collateral_exposure: float,
+) -> int | None:
+    engine = get_engine()
+    if engine is None:
+        print("[DB] save_breach_execution skipped — no engine", flush=True)
+        return None
+    try:
+        with engine.begin() as conn:
+            rules_id = conn.execute(
+                text(
+                    """
+                    INSERT INTO collateral_rules
+                        (loan_value, haircut_pct, issuer_limit_pct,
+                         absolute_exposure_limit, max_pct_of_shares,
+                         lot_size, existing_collateral)
+                    VALUES
+                        (:loan_value, :haircut_pct, :issuer_limit_pct,
+                        :absolute_exposure_limit, :max_pct_of_shares,
+                        :lot_size, CAST(:existing_collateral AS JSONB))
+                    RETURNING id
+                    """
+                ),
+                rules,
+            ).scalar_one()
+
+            excess = collateral_provided - collateral_needed
+
+            result_id = conn.execute(
+                text(
+                    """
+                    INSERT INTO optimization_results
+                        (rules_id, status, collateral_needed,
+                         collateral_provided, excess, proposal,
+                         collateral_exposure, exposure_breach,
+                         applied_transactions, resolved_optimization_id)
+                    VALUES
+                        (:rules_id, 'RESOLVED', :collateral_needed,
+                         :collateral_provided, :excess, CAST('[]' AS JSONB),
+                         :collateral_exposure, FALSE,
+                         CAST(:applied_transactions AS JSONB), :resolved_optimization_id)
+                    RETURNING id
+                    """
+                ),
+                {
+                    "rules_id": rules_id,
+                    "collateral_needed": collateral_needed,
+                    "collateral_provided": collateral_provided,
+                    "excess": excess,
+                    "collateral_exposure": collateral_exposure,
+                    "applied_transactions": json.dumps(applied_transactions),
+                    "resolved_optimization_id": resolved_optimization_id,
+                },
+            ).scalar_one()
+        print(f"[DB] save_breach_execution OK — result_id={result_id}", flush=True)
+        return result_id
+    except Exception as e:
+        print(f"[DB] save_breach_execution FAILED: {e}", flush=True)
+        traceback.print_exc()
+        return None
 
 def list_history(limit: int = 20) -> list[dict]:
     engine = get_engine()

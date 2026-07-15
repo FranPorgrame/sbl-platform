@@ -81,3 +81,11 @@ class OptimizeResponse(BaseModel):
     exposure_breach: bool = False
     proposed_transactions: list[ProposedTransaction] = []
     fully_resolved: bool = True
+
+
+class ExecuteBreachRequest(BaseModel):
+    optimization_id: int
+    rules: dict  # mismo shape que OptimizeRequest.rules
+    applied_transactions: list[ProposedTransaction]
+    collateral_needed: float
+    collateral_provided: float  # el "provided" ANTES del recall
