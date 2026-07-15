@@ -8,7 +8,7 @@ load_dotenv()
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from models import OptimizeRequest, OptimizeResponse, ProposedTransaction
+from models import OptimizeRequest, OptimizeResponse, ProposedTransaction, ExecuteBreachRequest
 from optimizer import (
     optimize as run_optimizer,
     check_exposure_breach,
