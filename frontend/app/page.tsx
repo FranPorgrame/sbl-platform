@@ -237,9 +237,14 @@ export default function App() {
         body: JSON.stringify(payload), signal: ctrl.signal,
       });
       clearTimeout(t);
+
+      if (res.status === 422) {
+        const errData = await res.json();
+        throw new Error(errData.detail || "El backend rechazó la solicitud.");
+      }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
       const data = await res.json();
-      // Map backend proposal (keyed by isin) back to row ids, honouring exclusions.
       const next = {};
       for (const line of data.proposal || []) {
         const row = longs.find((l) => l.isin === line.isin && !excluded.has(l.id));
@@ -260,11 +265,16 @@ export default function App() {
       });
       setBreachError("");
     } catch (e) {
-      // Fallback: local engine so the demo never dies.
-      setProposals(optimizeLocal(longs, excluded, params));
-      setEngine("local");
-      setEngineMsg(e.name === "AbortError" ? "backend timeout" : "backend unreachable");
-      setBreachInfo(null);
+      if (e.message && e.message.includes("recall")) {
+        setEngine("error");
+        setEngineMsg(e.message);
+        setBreachInfo(null);
+      } else {
+        setProposals(optimizeLocal(longs, excluded, params));
+        setEngine("local");
+        setEngineMsg(e.name === "AbortError" ? "backend timeout" : "backend unreachable");
+        setBreachInfo(null);
+      }
     }
   };
 
@@ -439,7 +449,7 @@ export default function App() {
             </table>
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <Btn primary onClick={executeBreach} disabled={executingBreach}>
-                {executingBreach ? "Ejecutando…" : "Ejecutar"}
+                {executingBreach ? "Executing" : "Execute"}
               </Btn>
               <Btn disabled>Again</Btn>
               {breachError && <span style={{ color: C.red, fontSize: 11 }}>{breachError}</span>}
