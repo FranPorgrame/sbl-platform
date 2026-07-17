@@ -8,11 +8,12 @@ load_dotenv()
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from models import OptimizeRequest, OptimizeResponse, ProposedTransaction, ExecuteBreachRequest
+from models import OptimizeRequest, OptimizeResponse, ProposedTransaction, ExecuteBreachRequest, BreachAlternativeRequest
 from optimizer import (
     optimize as run_optimizer,
     check_exposure_breach,
     propose_breach_resolution,
+    propose_breach_alternative,
     NoValidBreachResolutionError,
 )
 import db
@@ -103,7 +104,7 @@ def execute_breach_resolution(req: ExecuteBreachRequest):
 
 
 @app.post("/propose-breach-alternative")
-def propose_breach_alternative(req: BreachAlternativeRequest):
+def propose_breach_alternative_endpoint(req: BreachAlternativeRequest):
     # Tope de 5 intentos — el intento 1 es la propuesta automática inicial
     if req.attempt_number >= 5:
         raise HTTPException(
@@ -112,19 +113,29 @@ def propose_breach_alternative(req: BreachAlternativeRequest):
                     "message": "The maximum of 5 attempts was reached."}
         )
 
-    result = solve_breach_alternative(
-        positions=req.positions,
-        rules=req.rules,
-        collateral_needed=req.collateral_needed,
-        collateral_provided=req.collateral_provided,
-        previous_attempts=req.previous_attempts,  # lista de listas de ISINs
+    # Reconstruimos el proposal desde las posiciones, corriendo el optimizer.
+    opt_result = run_optimizer(
+        OptimizeRequest(positions=req.positions, rules=req.rules)
     )
+    collateral_exposure = req.collateral_provided - req.collateral_needed
 
-    if result is None:
+    try:
+        transactions, fully_resolved = propose_breach_alternative(
+            proposal=opt_result.proposal,
+            collateral_exposure=collateral_exposure,
+            absolute_exposure_limit=req.rules.absolute_exposure_limit,
+            lot_size=req.rules.lot_size,
+            issuer_limit_pct=req.rules.issuer_limit_pct,
+            previous_attempts=req.previous_attempts,
+        )
+    except NoValidBreachResolutionError as e:
         raise HTTPException(
             status_code=422,
-            detail={"error_code": "no_alternative_found",
-                    "message": "No se pudo encontrar una combinación que solucione el breach."}
+            detail={"error_code": "no_alternative_found", "message": str(e)}
         )
 
-    return result
+    return {
+        "proposed_transactions": [t.model_dump() for t in transactions],
+        "fully_resolved": fully_resolved,
+        "collateral_exposure": collateral_exposure,
+    }
