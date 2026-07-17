@@ -161,6 +161,8 @@ export default function App() {
   const [breachInfo, setBreachInfo] = useState(null);
   const [executingBreach, setExecutingBreach] = useState(false);
   const [breachError, setBreachError] = useState("");
+  const [proposingAgain, setProposingAgain] = useState(false);
+  const [noMoreAlternatives, setNoMoreAlternatives] = useState(false);
   
   const fmt = useFmt(ccy);
 
@@ -240,7 +242,12 @@ export default function App() {
 
       if (res.status === 422) {
         const errData = await res.json();
-        throw new Error(errData.detail || "El backend rechazó la solicitud.");
+        const code = errData.detail?.error_code;
+        const msg = errData.detail?.message || "El backend rechazó la solicitud.";
+        // Marcamos el error de negocio para distinguirlo de una caída de red
+        const bizErr = new Error(msg);
+        bizErr.isBusinessError = !!code;
+        throw bizErr;
       }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
@@ -254,18 +261,22 @@ export default function App() {
       setEngine("backend");
       setEngineMsg(`${data.status} · excess ${fmt.money(data.excess)}`);
 
+      const firstTx = data.proposed_transactions || [];
       setBreachInfo({
         optimizationId: data.id,
         exposureBreach: data.exposure_breach,
-        proposedTransactions: data.proposed_transactions || [],
+        proposedTransactions: firstTx,
         fullyResolved: data.fully_resolved,
         collateralNeeded: data.collateral_needed,
         collateralProvided: data.collateral_provided,
         exposure: data.collateral_exposure,
+        attemptNumber: 1,
+        previousAttempts: [firstTx.map((t) => t.isin)],
       });
       setBreachError("");
+      setNoMoreAlternatives(false);
     } catch (e) {
-      if (e.message && e.message.includes("recall")) {
+      if (e.isBusinessError) {
         setEngine("error");
         setEngineMsg(e.message);
         setBreachInfo(null);
@@ -325,9 +336,65 @@ export default function App() {
         exposure: data.collateral_exposure,
       }));
     } catch (e) {
-      setBreachError("No se pudo ejecutar la resolución del breach.");
+      setBreachError("An alternative proposal could not be generated.");
     } finally {
       setExecutingBreach(false);
+    }
+  };
+
+  const proposeAgain = async () => {
+    if (!breachInfo) return;
+    setProposingAgain(true);
+    setBreachError("");
+    try {
+      const payload = {
+        positions: rows.map((r) => ({ name: r.name, isin: r.isin, quantity: r.qty, price: r.price })),
+        rules: {
+          loan_value: params.loanValue,
+          haircut_pct: params.haircut,
+          issuer_limit_pct: params.issuerLimit,
+          absolute_exposure_limit: params.absLimit > 0 ? params.absLimit : null,
+          max_pct_of_shares: params.maxPct,
+          lot_size: params.lot,
+          existing_collateral: {},
+        },
+        collateral_needed: breachInfo.collateralNeeded,
+        collateral_provided: breachInfo.collateralProvided,
+        previous_attempts: breachInfo.previousAttempts,
+        attempt_number: breachInfo.attemptNumber,
+      };
+      const res = await fetch(`${backendUrl}/propose-breach-alternative`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (res.status === 422) {
+        const errData = await res.json();
+        const code = errData.detail?.error_code;
+        if (code === "no_alternative_found" || code === "max_attempts_reached") {
+          setNoMoreAlternatives(true);
+          setBreachError(errData.detail?.message || "No other combination was found.");
+          return;
+        }
+        throw new Error(errData.detail?.message || "The backend rejected the request.");
+      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      const data = await res.json();
+      const newTx = data.proposed_transactions || [];
+      setBreachInfo((b) => ({
+        ...b,
+        proposedTransactions: newTx,
+        fullyResolved: data.fully_resolved,
+        exposure: data.collateral_exposure,
+        attemptNumber: b.attemptNumber + 1,
+        previousAttempts: [...b.previousAttempts, newTx.map((t) => t.isin)],
+      }));
+    } catch (e) {
+      setBreachError("An alternative proposal could not be generated.");
+    } finally {
+      setProposingAgain(false);
     }
   };
 
@@ -424,7 +491,7 @@ export default function App() {
                 AEL BREACH — exposure {fmt.money(breachInfo.exposure, true)}
               </span>
               {!breachInfo.fullyResolved && (
-                <span style={{ color: C.amber, fontSize: 10 }}>Resolución parcial</span>
+                <span style={{ color: C.amber, fontSize: 10 }}>Partial Resolution</span>
               )}
             </div>
             <table style={{ width: "100%", fontSize: 12, marginBottom: 12 }}>
@@ -451,7 +518,12 @@ export default function App() {
               <Btn primary onClick={executeBreach} disabled={executingBreach}>
                 {executingBreach ? "Executing" : "Execute"}
               </Btn>
-              <Btn disabled>Again</Btn>
+              <Btn
+                onClick={proposeAgain}
+                disabled={proposingAgain || noMoreAlternatives || breachInfo.attemptNumber >= 5}
+              >
+                {proposingAgain ? "Searching" : `Again (${breachInfo.attemptNumber}/5)`}
+              </Btn>
               {breachError && <span style={{ color: C.red, fontSize: 11 }}>{breachError}</span>}
             </div>
           </div>

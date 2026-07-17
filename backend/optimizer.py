@@ -271,3 +271,58 @@ def propose_breach_resolution(
         "No se encontró ninguna combinación de recall que resuelva el AEL breach "
         "sin generar un nuevo issuer limit breach."
     )
+
+def propose_breach_alternative(
+    proposal: list,
+    collateral_exposure: float,
+    absolute_exposure_limit: float,
+    lot_size: int,
+    issuer_limit_pct: float,
+    previous_attempts: list[list[str]],
+) -> tuple[list["ProposedTransaction"], bool]:
+    min_recall = collateral_exposure - absolute_exposure_limit
+    max_recall = collateral_exposure
+
+    prev_sets = [set(a) for a in previous_attempts]
+
+    # ISIN de cada posición del proposal.
+    # ⚠️ CONFIRMAR: ¿los items de `proposal` son dicts (p["isin"]) u objetos (p.isin)?
+    #    Ajustá _isin_of según lo que tengas.
+    def _isin_of(p):
+        return p["isin"]        # <-- si es objeto, cambiá por: return p.isin
+
+    all_isins = [_isin_of(p) for p in proposal]
+
+    # Priorizamos prohibir securities ya usados en intentos previos:
+    # son los que fuerzan una combinación distinta.
+    used_before = set().union(*prev_sets) if prev_sets else set()
+    forbid_order = list(used_before) + [i for i in all_isins if i not in used_before]
+
+    for forbidden in forbid_order:
+        reduced_pool = [p for p in proposal if _isin_of(p) != forbidden]
+        if not reduced_pool:
+            continue
+
+        for strategy in (_greedy_recall, _proportional_recall):
+            transactions, recalled = strategy(reduced_pool, min_recall, max_recall, lot_size)
+            if not transactions:
+                continue
+
+            cand_isins = {t.isin for t in transactions}
+
+            # Regla estricta: debe diferir en >=1 security entero de TODOS los intentos previos.
+            # Como comparamos sets de ISIN, "igual set" = misma combinación => se descarta.
+            if cand_isins in prev_sets:
+                continue
+
+            # Mismo chequeo de issuer limit que en propose_breach_resolution.
+            issuer_pcts = check_issuer_limit_post_recall(proposal, transactions)
+            if any(pct > issuer_limit_pct for pct in issuer_pcts.values()):
+                continue
+
+            fully_resolved = recalled >= min_recall
+            return transactions, fully_resolved
+
+    raise NoValidBreachResolutionError(
+        "No se pudo encontrar otra combinación de recall que resuelva el AEL breach."
+    )

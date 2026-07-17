@@ -100,3 +100,31 @@ def execute_breach_resolution(req: ExecuteBreachRequest):
     if result_id is None:
         raise HTTPException(status_code=500, detail="No se pudo guardar la ejecución del breach.")
     return {"result_id": result_id, "collateral_provided": new_provided, "collateral_exposure": new_exposure}
+
+
+@app.post("/propose-breach-alternative")
+def propose_breach_alternative(req: BreachAlternativeRequest):
+    # Tope de 5 intentos — el intento 1 es la propuesta automática inicial
+    if req.attempt_number >= 5:
+        raise HTTPException(
+            status_code=422,
+            detail={"error_code": "max_attempts_reached",
+                    "message": "The maximum of 5 attempts was reached."}
+        )
+
+    result = solve_breach_alternative(
+        positions=req.positions,
+        rules=req.rules,
+        collateral_needed=req.collateral_needed,
+        collateral_provided=req.collateral_provided,
+        previous_attempts=req.previous_attempts,  # lista de listas de ISINs
+    )
+
+    if result is None:
+        raise HTTPException(
+            status_code=422,
+            detail={"error_code": "no_alternative_found",
+                    "message": "No se pudo encontrar una combinación que solucione el breach."}
+        )
+
+    return result

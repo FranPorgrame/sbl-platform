@@ -90,3 +90,12 @@ class ExecuteBreachRequest(BaseModel):
     applied_transactions: list[ProposedTransaction]
     collateral_needed: float
     collateral_provided: float  # el "provided" ANTES del recall
+
+
+class BreachAlternativeRequest(BaseModel):
+    positions: list[Position]          # reusá tu tipo Position existente
+    rules: CollateralRules             # reusá tu tipo de reglas existente
+    collateral_needed: float
+    collateral_provided: float
+    previous_attempts: list[list[str]] # cada sublista = ISINs de un intento
+    attempt_number: int
