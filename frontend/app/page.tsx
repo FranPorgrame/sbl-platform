@@ -77,17 +77,15 @@ const rowsFromSample = () =>
   SAMPLE.positions.map(([name, isin, qty, price], i) => ({ id: `${isin}-${i}`, name, isin, qty, price }));
 
 // ---- Local fallback engine (greedy) -----------------------
-function optimizeLocal(longs, excluded, { loanValue, haircut, issuerLimit, absLimit, maxPct, lot }) {
+function optimizeLocal(longs, excluded, { loanValue, haircut, issuerLimit, maxPct, lot }) {
   const needed = loanValue * (1 + haircut / 100);
   const issuerCapMV = issuerLimit > 0 ? (issuerLimit / 100) * needed : Infinity;
-  const absCap = absLimit && absLimit > 0 ? absLimit : Infinity;
-  const capMV = Math.min(issuerCapMV, absCap);
   const elig = longs.filter((l) => !excluded.has(l.id)).map((l) => ({ ...l, mv: l.qty * l.price })).sort((a, b) => b.mv - a.mv);
   let provided = 0; const prop = {};
   for (const l of elig) {
     if (provided >= needed - 1e-6) break;
     const maxByShares = Math.floor(l.qty * (maxPct / 100));
-    const maxByMV = Math.floor(capMV / l.price);
+    const maxByMV = Math.floor(issuerCapMV / l.price);
     const maxShares = lotFloor(Math.min(maxByShares, maxByMV), lot);
     if (maxShares <= 0) continue;
     const ideal = lotCeil((needed - provided) / l.price, lot);
@@ -480,6 +478,7 @@ export default function App() {
               {engine === "loading" && "optimizing…"}
               {engine === "backend" && `MILP engine · ${engineMsg}`}
               {engine === "local" && `browser fallback · ${engineMsg}`}
+              {engine === "error" && `⚠ ${engineMsg}`}
               {engine === "idle" && "ready"}
             </div>
           </div>

@@ -62,7 +62,10 @@ def optimize(req: OptimizeRequest) -> OptimizeResponse:
                 result.proposal, exposure, r.absolute_exposure_limit, r.lot_size, r.issuer_limit_pct
             )
         except NoValidBreachResolutionError as e:
-            raise HTTPException(status_code=422, detail=str(e))
+            raise HTTPException(
+                status_code=422,
+                detail={"error_code": "no_valid_breach_resolution", "message": str(e)}
+            )
 
     result.proposed_transactions = proposed_transactions
     result.fully_resolved = fully_resolved
