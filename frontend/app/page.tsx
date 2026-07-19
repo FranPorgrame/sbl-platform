@@ -584,14 +584,16 @@ export default function App() {
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
                 <thead><tr style={{ color: C.dim, fontSize: 9, letterSpacing: 1 }}>
-                  {["SECURITY", "ISIN", "QTY TOTAL", "PRICE", "MARKET VALUE", "PROPOSED TRANSACTIONS", "PROPOSED MV", "% POS", "% COLL", "ACTION"].map((h, i) => (
+                  {["SECURITY", "ISIN", "QTY TOTAL", "PRICE", "MARKET VALUE", "EXISTING COLLATERAL", "PROPOSED TRANSACTIONS", "PROPOSED MV", "% POS", "% COLL", "ACTION"].map((h, i) => (
                     <th key={h} style={{ textAlign: i < 2 ? "left" : "right", padding: "10px 16px", fontWeight: 400, whiteSpace: "nowrap" }}>{h}</th>))}
                 </tr></thead>
                 <tbody>
                   {longs.map((l) => {
                     const ex = excluded.has(l.id); const sh = proposals[l.id] || 0;
                     const pct = l.qty > 0 ? (sh / l.qty) * 100 : 0; const breach = rowBreach(l);
-                    const coll = provided > 0 ? (sh * l.price / provided) * 100 : 0;
+                    const totalCollateralValue = provided + existingCollateralValue;
+                    const rowCombinedValue = sh * l.price + (l.existingQty || 0) * l.price;
+                    const coll = totalCollateralValue > 0 ? (rowCombinedValue / totalCollateralValue) * 100 : 0;
                     return (
                       <tr key={l.id} className="rowh" style={{ borderTop: `1px solid ${C.lineSoft}`, opacity: ex ? 0.32 : 1 }}>
                         <td style={{ padding: "12px 16px", fontWeight: 600 }}>{l.name}</td>
@@ -599,6 +601,9 @@ export default function App() {
                         <td style={{ padding: "12px 16px", textAlign: "right", color: C.dim }}>{fmt.int(l.qty)}</td>
                         <td style={{ padding: "12px 16px", textAlign: "right", color: C.dim }}>{fmt.price(l.price)}</td>
                         <td style={{ padding: "12px 16px", textAlign: "right" }}>{fmt.money(l.mv)}</td>
+                        <td style={{ padding: "12px 16px", textAlign: "right", color: l.existingQty > 0 ? C.text : C.dimmer }}>
+                          {l.existingQty > 0 ? `${fmt.int(l.existingQty)} sh` : "—"}
+                        </td>
                         <td style={{ padding: "8px 16px", textAlign: "right" }}>
                           {!ex && <input value={sh ? Number(sh).toLocaleString('en-US') : ""} onChange={(e) => editProposed(l.id, e.target.value.replace(/,/g, ''))}
                           style={{ width: 96, textAlign: "right", background: C.panelAlt, border: `1px solid ${breach ? C.red : C.line}`, color: breach ? C.red : C.text, fontFamily: MONO, fontSize: 12.5, padding: "6px 8px", outline: "none" }} />}
