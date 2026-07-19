@@ -102,7 +102,7 @@ def execute_breach_resolution(req: ExecuteBreachRequest):
         collateral_exposure=new_exposure,
     )
     if result_id is None:
-        raise HTTPException(status_code=500, detail="No se pudo guardar la ejecución del breach.")
+        raise HTTPException(status_code=500, detail="The breach execution could not be saved.")
     return {"result_id": result_id, "collateral_provided": new_provided, "collateral_exposure": new_exposure}
 
 

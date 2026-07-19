@@ -131,14 +131,14 @@ def check_exposure_breach(result: OptimizeResponse, rules) -> tuple[bool, float]
 import math
 
 class NoValidBreachResolutionError(Exception):
-    """No se encontró ninguna combinación de recall que resuelva
-    el AEL breach sin generar un nuevo issuer limit breach."""
+    """No recall combination was found that resolves the AEL 
+    breach without generating a new issuer limit breach.."""
     pass
 
 
 def check_issuer_limit_post_recall(proposal: list, transactions: list["ProposedTransaction"]) -> dict[str, float]:
-    """Simula el proposal después de aplicar las transactions y devuelve
-    el % de cada ISIN restante sobre el nuevo total pledgeado."""
+    """Simulate the proposal after applying the transactions and return
+    the percentage of each remaining ISIN on the new pledged total."""
     recalled_by_isin = {t.isin: t.shares for t in transactions}
 
     remaining_mv_by_isin = {}
@@ -264,12 +264,12 @@ def propose_breach_resolution(
 
     if no_transactions_found:
         raise NoValidBreachResolutionError(
-            "No se pudo generar ninguna transacción de recall: el excedente a recuperar "
-            "es menor al valor de un lote mínimo de cualquier posición disponible."
+            "No recall transaction could be generated: the excess to be recovered "
+            "is smaller than the value of the minimum lot of any available position."
         )
     raise NoValidBreachResolutionError(
-        "No se encontró ninguna combinación de recall que resuelva el AEL breach "
-        "sin generar un nuevo issuer limit breach."
+        "No recall combination was found that resolves the AEL breach "
+        "without generating a new issuer limit breach."
     )
 
 def propose_breach_alternative(
@@ -324,5 +324,5 @@ def propose_breach_alternative(
             return transactions, fully_resolved
 
     raise NoValidBreachResolutionError(
-        "No se pudo encontrar otra combinación de recall que resuelva el AEL breach."
+        "No recall combination was found that resolves the AEL breach."
     )
