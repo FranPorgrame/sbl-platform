@@ -172,9 +172,25 @@ export default function App() {
 
   const longs = useMemo(() => rows.filter((r) => r.qty > 0).map((r) => ({ ...r, mv: r.qty * r.price })), [rows]);
   const shorts = useMemo(() => rows.filter((r) => r.qty < 0).map((r) => ({ ...r, mv: Math.abs(r.qty) * r.price })), [rows]);
+  const existingCollateral = useMemo(() => {
+    const dict = {};
+    for (const r of rows) {
+      if (r.qty > 0 && r.existingQty > 0) dict[r.isin] = Math.round(r.existingQty);
+    }
+    return dict;
+  }, [rows]);
+  
+  const existingCollateralValue = useMemo(() => {
+    let total = 0;
+    for (const r of rows) {
+      if (r.qty > 0 && r.existingQty > 0) total += r.existingQty * r.price;
+    }
+    return total;
+  }, [rows]);
   const grossShort = useMemo(() => shorts.reduce((a, s) => a + s.mv, 0), [shorts]);
   const totalMV = useMemo(() => rows.reduce((a, r) => a + Math.abs(r.qty) * r.price, 0), [rows]);
-  const needed = params.loanValue * (1 + params.haircut / 100);
+  const neededGross = params.loanValue * (1 + params.haircut / 100);
+  const needed = Math.max(0, neededGross - existingCollateralValue);
   const provided = useMemo(() => longs.reduce((a, l) => a + (proposals[l.id] || 0) * l.price, 0), [longs, proposals]);
   const exposure = provided - needed;
   const exposureLabel = params.absLimit > 0
@@ -187,8 +203,17 @@ export default function App() {
       const isin = r.isin ?? r.ISIN ?? "";
       const qty = parseNum(r.qty ?? r.Quantity ?? r.quantity ?? r.QTY ?? r.shares);
       const price = parseNum(r.price ?? r.Price ?? r.PRICE);
+      const existingQty = parseNum(
+        r["Existing Collateral"] ?? r["Existing Collateral Qty"] ?? r.existingCollateral ?? r.ExistingCollateral
+      );
+      const existingCcy = r["Existing Collateral CCY"] ?? r.existingCcy ?? r.CCY ?? "";
       return nm && Number.isFinite(qty) && Number.isFinite(price)
-        ? { id: `${isin || nm}-${i}`, name: String(nm), isin: String(isin), qty, price } : null;
+        ? {
+            id: `${isin || nm}-${i}`, name: String(nm), isin: String(isin), qty, price,
+            existingQty: Number.isFinite(existingQty) ? existingQty : 0,
+            existingCcy: String(existingCcy),
+          }
+        : null;
     }).filter(Boolean);
     if (!mapped.length) { setError("No valid positions. Expected: Security · ISIN · Quantity · Price."); return; }
     setError(""); setRows(mapped); setFilename(name); setProposals({}); setExcluded(new Set()); setEngine("idle");
@@ -225,7 +250,7 @@ export default function App() {
       rules: {
         loan_value: params.loanValue, haircut_pct: params.haircut, issuer_limit_pct: params.issuerLimit,
         absolute_exposure_limit: params.absLimit > 0 ? params.absLimit : null,
-        max_pct_of_shares: params.maxPct, lot_size: params.lot, existing_collateral: {},
+        max_pct_of_shares: params.maxPct, lot_size: params.lot, existing_collateral: existingCollateral,
       },
       currency: ccy,
     };
@@ -301,7 +326,7 @@ export default function App() {
           absolute_exposure_limit: params.absLimit > 0 ? params.absLimit : null,
           max_pct_of_shares: params.maxPct,
           lot_size: params.lot,
-          existing_collateral: {},
+          existing_collateral: existingCollateral,
         },
         applied_transactions: breachInfo.proposedTransactions,
         collateral_needed: breachInfo.collateralNeeded,
@@ -354,7 +379,7 @@ export default function App() {
           absolute_exposure_limit: params.absLimit > 0 ? params.absLimit : null,
           max_pct_of_shares: params.maxPct,
           lot_size: params.lot,
-          existing_collateral: {},
+          existing_collateral: existingCollateral,
         },
         collateral_needed: breachInfo.collateralNeeded,
         collateral_provided: breachInfo.collateralProvided,
@@ -408,7 +433,7 @@ export default function App() {
 
   const rowBreach = (l) => {
     const sh = proposals[l.id] || 0; if (!sh) return null;
-    const issuerCapMV = params.issuerLimit > 0 ? (params.issuerLimit / 100) * needed : Infinity;
+    const issuerCapMV = params.issuerLimit > 0 ? (params.issuerLimit / 100) * neededGross : Infinity;
     const absCap = params.absLimit > 0 ? params.absLimit : Infinity;
     if (sh * l.price > Math.min(issuerCapMV, absCap) + 1) return "issuer";
     if (sh > l.qty * (params.maxPct / 100) + 0.5) return "shares";
