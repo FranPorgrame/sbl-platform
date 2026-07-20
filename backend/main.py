@@ -128,6 +128,33 @@ def execute_breach_resolution(req: ExecuteBreachRequest):
     return {"result_id": result_id, "collateral_provided": new_provided, "collateral_exposure": new_exposure}
 
 
+@app.post("/execute-issuer-breach-resolution")
+def execute_issuer_breach_resolution(req: ExecuteIssuerBreachRequest):
+    current_shares = req.existing_collateral.get(req.isin, 0)
+    new_shares = max(0, current_shares - req.shares_recalled)
+
+    updated_existing_collateral = dict(req.existing_collateral)
+    updated_existing_collateral[req.isin] = new_shares
+
+    needed_gross = req.rules.loan_value * (1 + req.rules.haircut_pct / 100)
+    issuer_cap = (
+        (req.rules.issuer_limit_pct / 100) * needed_gross
+        if req.rules.issuer_limit_pct > 0 else None
+    )
+
+    new_mv = new_shares * req.price
+    still_breached = issuer_cap is not None and new_mv > issuer_cap
+    remaining_excess = round(max(0.0, new_mv - issuer_cap), 2) if issuer_cap is not None else 0.0
+
+    return {
+        "isin": req.isin,
+        "updated_existing_collateral": updated_existing_collateral,
+        "new_existing_mv": round(new_mv, 2),
+        "still_breached": still_breached,
+        "remaining_excess": remaining_excess,
+    }
+
+
 @app.post("/propose-breach-alternative")
 def propose_breach_alternative_endpoint(req: BreachAlternativeRequest):
     # Tope de 5 intentos — el intento 1 es la propuesta automática inicial

@@ -101,3 +101,12 @@ class BreachAlternativeRequest(BaseModel):
     collateral_provided: float
     previous_attempts: list[list[str]] # cada sublista = ISINs de un intento
     attempt_number: int
+
+
+class ExecuteIssuerBreachRequest(BaseModel):
+    isin: str
+    name: str
+    price: float
+    shares_recalled: int
+    existing_collateral: dict[str, int]  # existing collateral ANTES del recall
+    rules: Rules    
