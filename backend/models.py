@@ -96,7 +96,7 @@ class ExecuteBreachRequest(BaseModel):
 
 class BreachAlternativeRequest(BaseModel):
     positions: list[Position]          # reusá tu tipo Position existente
-    rules: CollateralRules             # reusá tu tipo de reglas existente
+    rules: Rules                        # reusá tu tipo de reglas existente
     collateral_needed: float
     collateral_provided: float
     previous_attempts: list[list[str]] # cada sublista = ISINs de un intento

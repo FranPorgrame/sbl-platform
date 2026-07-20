@@ -161,6 +161,10 @@ export default function App() {
   const [breachError, setBreachError] = useState("");
   const [proposingAgain, setProposingAgain] = useState(false);
   const [noMoreAlternatives, setNoMoreAlternatives] = useState(false);
+
+  const [issuerBreachInfo, setIssuerBreachInfo] = useState(null);
+  const [executingIssuerBreach, setExecutingIssuerBreach] = useState(false);
+  const [issuerBreachError, setIssuerBreachError] = useState("");
   
   const fmt = useFmt(ccy);
 
@@ -172,13 +176,15 @@ export default function App() {
 
   const longs = useMemo(() => rows.filter((r) => r.qty > 0).map((r) => ({ ...r, mv: r.qty * r.price })), [rows]);
   const shorts = useMemo(() => rows.filter((r) => r.qty < 0).map((r) => ({ ...r, mv: Math.abs(r.qty) * r.price })), [rows]);
+  const [existingCollateralOverrides, setExistingCollateralOverrides] = useState({});
+
   const existingCollateral = useMemo(() => {
     const dict = {};
     for (const r of rows) {
       if (r.qty > 0 && r.existingQty > 0) dict[r.isin] = Math.round(r.existingQty);
     }
-    return dict;
-  }, [rows]);
+    return { ...dict, ...existingCollateralOverrides };
+  }, [rows, existingCollateralOverrides]);
   
   const existingCollateralValue = useMemo(() => {
     let total = 0;
@@ -216,7 +222,7 @@ export default function App() {
         : null;
     }).filter(Boolean);
     if (!mapped.length) { setError("No valid positions. Expected: Security · ISIN · Quantity · Price."); return; }
-    setError(""); setRows(mapped); setFilename(name); setProposals({}); setExcluded(new Set()); setEngine("idle");
+    setError(""); setRows(mapped); setFilename(name); setProposals({}); setExcluded(new Set()); setEngine("idle"); setExistingCollateralOverrides({});
     const gs = mapped.filter((r) => r.qty < 0).reduce((a, r) => a + Math.abs(r.qty) * r.price, 0);
     setLoanValue(String(Math.round(gs * 100) / 100));
   };
@@ -296,6 +302,16 @@ export default function App() {
         attemptNumber: 1,
         previousAttempts: [firstTx.map((t) => t.isin)],
       });
+
+      if (data.issuer_breach) {
+        setIssuerBreachInfo({
+          transactions: data.issuer_breach_transactions,
+        });
+      } else {
+        setIssuerBreachInfo(null);
+      }
+      setIssuerBreachError("");
+      
       setBreachError("");
       setNoMoreAlternatives(false);
     } catch (e) {
@@ -365,6 +381,50 @@ export default function App() {
     }
   };
 
+    const executeIssuerBreach = async (tx) => {
+      setExecutingIssuerBreach(true);
+      setIssuerBreachError("");
+      try {
+        const payload = {
+          isin: tx.isin,
+          name: tx.name,
+          price: longs.find((l) => l.isin === tx.isin)?.price || 0,
+          shares_recalled: tx.shares,
+          existing_collateral: existingCollateral,
+          rules: {
+            loan_value: params.loanValue,
+            haircut_pct: params.haircut,
+            issuer_limit_pct: params.issuerLimit,
+            absolute_exposure_limit: params.absLimit > 0 ? params.absLimit : null,
+            max_pct_of_shares: params.maxPct,
+            lot_size: params.lot,
+            existing_collateral: existingCollateral,
+          },
+        };
+        const res = await fetch(`${backendUrl}/execute-issuer-breach-resolution`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+
+        setExistingCollateralOverrides((prev) => ({
+          ...prev,
+          [tx.isin]: data.updated_existing_collateral[tx.isin],
+        }));
+
+        setIssuerBreachInfo((b) => {
+          const remaining = b.transactions.filter((t) => t.isin !== tx.isin);
+          return remaining.length > 0 ? { ...b, transactions: remaining } : null;
+        });
+      } catch (e) {
+        setIssuerBreachError("The issuer breach resolution could not be executed.");
+      } finally {
+        setExecutingIssuerBreach(false);
+      }
+    };
+
   const proposeAgain = async () => {
     if (!breachInfo) return;
     setProposingAgain(true);
@@ -422,7 +482,7 @@ export default function App() {
   };
 
   const reset = () => { setProposals({}); setExcluded(new Set()); setEngine("idle"); setEngineMsg(""); };
-  const clearAll = () => { setRows([]); setFilename(""); setProposals({}); setExcluded(new Set()); setLoanValue(""); setError(""); setEngine("idle"); };
+  const clearAll = () => { setRows([]); setFilename(""); setProposals({}); setExcluded(new Set()); setLoanValue(""); setError(""); setEngine("idle"); setExistingCollateralOverrides({}); };
   const toggleExclude = (id) => {
     const next = new Set(excluded);
     if (next.has(id)) next.delete(id);
@@ -508,6 +568,43 @@ export default function App() {
             </div>
           </div>
           
+          {issuerBreachInfo?.transactions?.length > 0 && (
+            <div style={{ background: "#2a1414", border: `1px solid ${C.red}`, padding: "14px 18px", marginBottom: 14 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                <span style={{ color: C.red, fontSize: 12, letterSpacing: 1 }}>
+                  ISSUER LIMIT BREACH — {issuerBreachInfo.transactions.length} security{issuerBreachInfo.transactions.length > 1 ? "ies" : ""} exceeding cap
+                </span>
+              </div>
+              <table style={{ width: "100%", fontSize: 12, marginBottom: 12 }}>
+                <thead><tr style={{ color: C.dim, fontSize: 9 }}>
+                  <th style={{ textAlign: "left", padding: "4px 8px" }}>SECURITY</th>
+                  <th style={{ textAlign: "left", padding: "4px 8px" }}>ISIN</th>
+                  <th style={{ textAlign: "right", padding: "4px 8px" }}>ACTION</th>
+                  <th style={{ textAlign: "right", padding: "4px 8px" }}>SHARES</th>
+                  <th style={{ textAlign: "right", padding: "4px 8px" }}>MARKET VALUE</th>
+                  <th style={{ textAlign: "right", padding: "4px 8px" }}></th>
+                </tr></thead>
+                <tbody>
+                  {issuerBreachInfo.transactions.map((t, i) => (
+                    <tr key={i} style={{ borderTop: `1px solid ${C.lineSoft}` }}>
+                      <td style={{ padding: "6px 8px" }}>{t.name}</td>
+                      <td style={{ padding: "6px 8px", color: C.dim }}>{t.isin}</td>
+                      <td style={{ padding: "6px 8px", textAlign: "right" }}>{t.action}</td>
+                      <td style={{ padding: "6px 8px", textAlign: "right" }}>{fmt.int(t.shares)}</td>
+                      <td style={{ padding: "6px 8px", textAlign: "right" }}>{fmt.money(t.market_value)}</td>
+                      <td style={{ padding: "6px 8px", textAlign: "right" }}>
+                        <Btn primary onClick={() => executeIssuerBreach(t)} disabled={executingIssuerBreach}>
+                          {executingIssuerBreach ? "Executing" : "Execute"}
+                        </Btn>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {issuerBreachError && <span style={{ color: C.red, fontSize: 11 }}>{issuerBreachError}</span>}
+            </div>
+          )}
+
           {breachInfo?.exposureBreach && (
           <div style={{ background: "#2a1414", border: `1px solid ${C.red}`, padding: "14px 18px", marginBottom: 14 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
