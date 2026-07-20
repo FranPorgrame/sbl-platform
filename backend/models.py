@@ -82,6 +82,8 @@ class OptimizeResponse(BaseModel):
     exposure_breach: bool = False
     proposed_transactions: list[ProposedTransaction] = []
     fully_resolved: bool = True
+    issuer_breach: bool = False
+    issuer_breach_transactions: list[ProposedTransaction] = []
 
 
 class ExecuteBreachRequest(BaseModel):

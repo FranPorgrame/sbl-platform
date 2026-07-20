@@ -54,7 +54,9 @@ def optimize(req: OptimizeRequest) -> OptimizeResponse:
         # Cota superior de lotes: el mínimo entre lo que permite cada regla.
         caps_shares = [p.quantity * (r.max_pct_of_shares / 100)]
         if issuer_cap is not None:
-            caps_shares.append(issuer_cap / p.price)
+            existing_mv_this_isin = r.existing_collateral.get(p.isin, 0) * p.price
+            remaining_issuer_cap = max(0.0, issuer_cap - existing_mv_this_isin)
+            caps_shares.append(remaining_issuer_cap / p.price)
         max_shares = min(caps_shares)
         max_lots = int(max_shares // lot)
         if max_lots <= 0:
@@ -126,6 +128,53 @@ def check_exposure_breach(result: OptimizeResponse, rules) -> tuple[bool, float]
     breach = abs(exposure) > rules.absolute_exposure_limit
     return breach, exposure
 
+
+def check_issuer_breach_pre_solve(req: OptimizeRequest) -> dict[str, float]:
+    """Compara el existing collateral de cada ISIN contra el issuer cap,
+    ANTES de correr el solver. Devuelve {isin: exceso_en_CHF}."""
+    r = req.rules
+    price_by_isin = {p.isin: p.price for p in req.positions}
+
+    if r.issuer_limit_pct <= 0:
+        return {}
+
+    needed_gross = r.loan_value * (1 + r.haircut_pct / 100)
+    issuer_cap = (r.issuer_limit_pct / 100) * needed_gross
+
+    breaches: dict[str, float] = {}
+    for isin, shares in r.existing_collateral.items():
+        price = price_by_isin.get(isin)
+        if price is None:
+            continue
+        mv = shares * price
+        if mv > issuer_cap:
+            breaches[isin] = round(mv - issuer_cap, 2)
+    return breaches
+
+
+def propose_issuer_breach_resolution(
+    isin: str,
+    excess_mv: float,
+    price: float,
+    name: str,
+    lot_size: int,
+) -> "ProposedTransaction":
+    """Recall mínimo (en lotes) para bajar ESTE ISIN puntual a su issuer cap.
+    Mismo patrón de lotes que _greedy_recall, pero apuntado a un solo ISIN
+    en vez de a un exceso total del AEL."""
+    lot_value = price * lot_size
+    if lot_value <= 0:
+        raise NoValidBreachResolutionError(
+            f"No se puede calcular un recall válido para {isin}: precio o lote inválido."
+        )
+    lots_to_recall = math.ceil(excess_mv / lot_value)
+    shares_to_recall = lots_to_recall * lot_size
+    mv_to_recall = shares_to_recall * price
+
+    return ProposedTransaction(
+        name=name, isin=isin, action="recall",
+        shares=shares_to_recall, market_value=round(mv_to_recall, 2),
+    )
 
 
 import math

@@ -14,6 +14,8 @@ from optimizer import (
     check_exposure_breach,
     propose_breach_resolution,
     propose_breach_alternative,
+    check_issuer_breach_pre_solve,
+    propose_issuer_breach_resolution,
     NoValidBreachResolutionError,
 )
 import db
@@ -46,9 +48,28 @@ def history(limit: int = 20) -> dict:
 
 @app.post("/optimize", response_model=OptimizeResponse)
 def optimize(req: OptimizeRequest) -> OptimizeResponse:
-    result = run_optimizer(req)
     r = req.rules
 
+    # --- Issuer limit breach (pre-solve, sobre existing collateral) ---
+    price_by_isin = {p.isin: p.price for p in req.positions}
+    name_by_isin = {p.isin: p.name for p in req.positions}
+
+    issuer_breaches = check_issuer_breach_pre_solve(req)
+    issuer_breach_transactions = []
+    for isin, excess in issuer_breaches.items():
+        tx = propose_issuer_breach_resolution(
+            isin=isin,
+            excess_mv=excess,
+            price=price_by_isin[isin],
+            name=name_by_isin[isin],
+            lot_size=r.lot_size,
+        )
+        issuer_breach_transactions.append(tx)
+
+    # --- Optimizer (ya corre con el fix que descuenta existing collateral del cap) ---
+    result = run_optimizer(req)
+
+    # --- AEL breach (post-solve, como ya estaba) ---
     breach, exposure = check_exposure_breach(result, r)
     result.exposure_breach = breach
     result.collateral_exposure = round(exposure, 2)
@@ -62,13 +83,14 @@ def optimize(req: OptimizeRequest) -> OptimizeResponse:
                 result.proposal, exposure, r.absolute_exposure_limit, r.lot_size, r.issuer_limit_pct
             )
         except NoValidBreachResolutionError as e:
-            raise HTTPException(
-                status_code=422,
-                detail={"error_code": "no_valid_breach_resolution", "message": str(e)}
-            )
+            raise HTTPException(status_code=422, detail=str(e))
 
     result.proposed_transactions = proposed_transactions
     result.fully_resolved = fully_resolved
+
+    # --- Campos nuevos del issuer breach ---
+    result.issuer_breach = len(issuer_breach_transactions) > 0
+    result.issuer_breach_transactions = issuer_breach_transactions
 
     saved_id = db.save_optimization(
         rules={
@@ -82,7 +104,7 @@ def optimize(req: OptimizeRequest) -> OptimizeResponse:
         },
         result=result.model_dump(),
     )
-    print(f"[API] /optimize done — status={result.status} saved_id={saved_id}", flush=True)
+    print(f"[API] /optimize done — status={result.status} saved_id={saved_id} issuer_breach={result.issuer_breach}", flush=True)
     result.id = saved_id
     return result
 
