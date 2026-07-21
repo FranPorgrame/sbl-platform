@@ -210,7 +210,7 @@ export default function App() {
       const qty = parseNum(r.qty ?? r.Quantity ?? r.quantity ?? r.QTY ?? r.shares);
       const price = parseNum(r.price ?? r.Price ?? r.PRICE);
       const existingQty = parseNum(
-        r["Existing Collateral"] ?? r["Existing Collateral Qty"] ?? r.existingCollateral ?? r.ExistingCollateral
+      r.existingQty ?? r["Existing Collateral"] ?? r["Existing Collateral Qty"] ?? r.existingCollateral ?? r.ExistingCollateral
       );
       const existingCcy = r["Existing Collateral CCY"] ?? r.existingCcy ?? r.CCY ?? "";
       return nm && Number.isFinite(qty) && Number.isFinite(price)
@@ -221,7 +221,7 @@ export default function App() {
           }
         : null;
     }).filter(Boolean);
-    if (!mapped.length) { setError("No valid positions. Expected: Security · ISIN · Quantity · Price."); return; }
+    if (!mapped.length) { setError("No valid positions. Expected: Security · ISIN · Quantity · Price · Existing Collateral."); return; }
     setError(""); setRows(mapped); setFilename(name); setProposals({}); setExcluded(new Set()); setEngine("idle"); setExistingCollateralOverrides({});
     const gs = mapped.filter((r) => r.qty < 0).reduce((a, r) => a + Math.abs(r.qty) * r.price, 0);
     setLoanValue(String(Math.round(gs * 100) / 100));
@@ -236,14 +236,87 @@ export default function App() {
     setProposals({}); setExcluded(new Set()); setError(""); setEngine("idle");
   };
 
+  // ---- Flexible header detection (funciona con headers en cualquier fila
+  //      y con nombres de columna variables, ej. "Security Name", "Price (EUR)") --
+  const HEADER_PATTERNS = {
+    existingCcy: /existing.*collateral.*ccy|existing.*ccy/i,
+    existingQty: /existing.*collateral/i,
+    isin: /^isin/i,
+    qty: /^(qty|quantity|shares)/i,
+    price: /^price/i,
+    name: /^(security|name|instrument)/i,
+  };
+
+  function matchField(header) {
+    const h = String(header ?? "").trim();
+    if (!h) return null;
+    // Orden importa: los patrones más específicos van primero.
+    if (HEADER_PATTERNS.existingCcy.test(h)) return "existingCcy";
+    if (HEADER_PATTERNS.existingQty.test(h)) return "existingQty";
+    if (HEADER_PATTERNS.isin.test(h)) return "isin";
+    if (HEADER_PATTERNS.qty.test(h)) return "qty";
+    if (HEADER_PATTERNS.price.test(h)) return "price";
+    if (HEADER_PATTERNS.name.test(h)) return "name";
+    return null;
+  }
+
+  // Busca en las primeras filas cuál es la fila de headers reales
+  // (la que tenga columna ISIN + al menos 3 campos reconocidos).
+  function findHeaderRow(rows2D) {
+    const maxScan = Math.min(rows2D.length, 15);
+    let best = { index: -1, score: 0 };
+    for (let i = 0; i < maxScan; i++) {
+      const row = rows2D[i] || [];
+      let score = 0, hasIsin = false;
+      for (const cell of row) {
+        const f = matchField(cell);
+        if (f) { score++; if (f === "isin") hasIsin = true; }
+      }
+      if (hasIsin && score >= 3 && score > best.score) best = { index: i, score };
+    }
+    return best.index;
+  }
+
+  // Convierte una matriz cruda (array de arrays) en objetos {name, isin, qty, price, ...}
+  // sin importar en qué fila esté el header ni el orden/nombre exacto de las columnas.
+  function rowsFromSheetArray(rows2D) {
+    const headerIdx = findHeaderRow(rows2D);
+    if (headerIdx === -1) return null;
+    const fieldByCol = (rows2D[headerIdx] || []).map(matchField);
+    const out = [];
+    for (let i = headerIdx + 1; i < rows2D.length; i++) {
+      const row = rows2D[i] || [];
+      const obj = {};
+      fieldByCol.forEach((field, col) => { if (field) obj[field] = row[col]; });
+      out.push(obj);
+    }
+    return out;
+  }
+
   const handleFile = useCallback((file) => {
     if (!file) return;
     const ext = file.name.split(".").pop().toLowerCase();
     if (ext === "csv") {
-      Papa.parse(file, { header: true, skipEmptyLines: true, complete: (res) => loadRows(res.data, file.name), error: () => setError("Could not read CSV.") });
+      Papa.parse(file, {
+        header: false, skipEmptyLines: true,
+        complete: (res) => {
+          const mapped = rowsFromSheetArray(res.data);
+          if (!mapped) { setError("No se encontraron columnas ISIN/Quantity/Price en el CSV."); return; }
+          loadRows(mapped, file.name);
+        },
+        error: () => setError("Could not read CSV."),
+      });
     } else if (["xlsx", "xls"].includes(ext)) {
       const reader = new FileReader();
-      reader.onload = (e) => { try { const wb = XLSX.read(e.target.result, { type: "array" }); loadRows(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" }), file.name); } catch { setError("Could not read Excel."); } };
+      reader.onload = (e) => {
+        try {
+          const wb = XLSX.read(e.target.result, { type: "array" });
+          const arr2D = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: "" });
+          const mapped = rowsFromSheetArray(arr2D);
+          if (!mapped) { setError("No se encontraron columnas ISIN/Quantity/Price en el Excel."); return; }
+          loadRows(mapped, file.name);
+        } catch { setError("Could not read Excel."); }
+      };
       reader.readAsArrayBuffer(file);
     } else setError("Unsupported file. Use .xlsx, .xls or .csv.");
   }, []);
