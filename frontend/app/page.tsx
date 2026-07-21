@@ -196,9 +196,10 @@ export default function App() {
   const grossShort = useMemo(() => shorts.reduce((a, s) => a + s.mv, 0), [shorts]);
   const totalMV = useMemo(() => rows.reduce((a, r) => a + Math.abs(r.qty) * r.price, 0), [rows]);
   const neededGross = params.loanValue * (1 + params.haircut / 100);
-  const needed = Math.max(0, neededGross - existingCollateralValue);
+  const needed = Math.max(0, neededGross - existingCollateralValue); // residual que debe cubrir el optimizer (se sigue usando en el long book)
   const provided = useMemo(() => longs.reduce((a, l) => a + (proposals[l.id] || 0) * l.price, 0), [longs, proposals]);
-  const exposure = provided - needed;
+  const totalCollateral = existingCollateralValue + provided; // existing collateral + lo que propone el optimizer
+  const exposure = totalCollateral - neededGross;
   const exposureLabel = params.absLimit > 0
     ? (exposure < -params.absLimit ? "shortfall" : exposure > params.absLimit ? "excess" : null)
     : null;
@@ -575,7 +576,7 @@ export default function App() {
   };
 
   const hasData = rows.length > 0;
-  const covered = provided >= needed - 1e-6;
+  const covered = totalCollateral >= neededGross - 1e-6;
   const engineColor = engine === "backend" ? C.green : engine === "local" ? C.amber : engine === "error" ? C.red : C.dim;
 
   return (
@@ -621,7 +622,7 @@ export default function App() {
           <div style={{ display: "flex", gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
             <Card label="TOTAL MARKET VALUE">{fmt.money(totalMV)}</Card>
             <Card label="TOTAL BORROWING" accent={C.text}>{fmt.money(grossShort)}</Card>
-            <Card label="TOTAL COLLATERAL" accent={covered ? C.green : C.amber} sub={`Needed ${fmt.money(needed)}`}>{fmt.money(provided)}</Card>
+            <Card label="TOTAL COLLATERAL" accent={covered ? C.green : C.amber} sub={`Needed ${fmt.money(neededGross)}`}>{fmt.money(totalCollateral)}</Card>
             <Card label="COLLATERAL EXPOSURE" accent={exposure >= 0 ? C.green : C.red} sub={exposureLabel}>{fmt.money(exposure, true)}</Card>
           </div>
 
