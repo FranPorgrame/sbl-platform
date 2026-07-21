@@ -2,7 +2,7 @@
 import React, { useState, useMemo, useRef, useCallback } from "react";
 import Papa from "papaparse";
 import * as XLSX from "xlsx";
-import { Upload, Zap, RotateCcw, Trash2, RefreshCw, Server, Wifi, WifiOff } from "lucide-react";
+import { Upload, Zap, RotateCcw, Trash2, RefreshCw, Server, Wifi, WifiOff, Download } from "lucide-react";
 
 /* ============================================================
    SBL — SECURITIES LENDING AND BORROWING
@@ -555,6 +555,58 @@ export default function App() {
     }
   };
 
+  const exportToExcel = () => {
+    const wb = XLSX.utils.book_new();
+
+    // Hoja 1: Summary — KPIs + parámetros
+    const summary = [
+      ["SBL — Collateral Optimization Export"],
+      ["File", filename],
+      ["Currency", ccy],
+      [],
+      ["METRIC", "VALUE"],
+      ["Total Market Value", Math.round(totalMV)],
+      ["Total Borrowing", Math.round(grossShort)],
+      ["Total Collateral", Math.round(totalCollateral)],
+      ["Needed", Math.round(neededGross)],
+      ["Collateral Exposure", Math.round(exposure)],
+      [],
+      ["PARAMETER", "VALUE"],
+      ["Haircut %", params.haircut],
+      ["Issuer Limit %", params.issuerLimit],
+      ["Absolute Exposure Limit", params.absLimit > 0 ? params.absLimit : "none"],
+      ["Max % of Shares", params.maxPct],
+      ["Lot Size", params.lot],
+    ];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summary), "Summary");
+
+    // Hoja 2: Long Positions — mismas columnas que la tabla en pantalla
+    const longHeader = [
+      "Security", "ISIN", "Qty Total", "Price", "Market Value",
+      "Existing Collateral (Shares)", "Proposed Transactions", "Proposed MV", "% Pos", "% Coll",
+    ];
+    const longRows = longs.map((l) => {
+      const sh = proposals[l.id] || 0;
+      const pct = l.qty > 0 ? ((sh + (l.existingQty || 0)) / l.qty) * 100 : 0;
+      const rowCombinedValue = sh * l.price + (l.existingQty || 0) * l.price;
+      const coll = totalCollateral > 0 ? (rowCombinedValue / totalCollateral) * 100 : 0;
+      return [
+        l.name, l.isin, l.qty, l.price, Math.round(l.mv),
+        l.existingQty || 0, sh, sh ? Math.round(sh * l.price) : 0,
+        sh ? Number(pct.toFixed(1)) : 0, sh ? Number(coll.toFixed(1)) : 0,
+      ];
+    });
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([longHeader, ...longRows]), "Long Positions");
+
+    // Hoja 3: Short Positions
+    const shortHeader = ["Security", "ISIN", "Shares", "Price", "Borrow Value"];
+    const shortRows = shorts.map((s) => [s.name, s.isin, s.qty, s.price, Math.round(s.mv)]);
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([shortHeader, ...shortRows]), "Short Positions");
+
+    const base = filename ? filename.replace(/\.(xlsx|xls|csv)$/i, "") : "sbl";
+    XLSX.writeFile(wb, `${base}_export.xlsx`);
+  };
+
   const reset = () => { setProposals({}); setExcluded(new Set()); setEngine("idle"); setEngineMsg(""); };
   const clearAll = () => { setRows([]); setFilename(""); setProposals({}); setExcluded(new Set()); setLoanValue(""); setError(""); setEngine("idle"); setExistingCollateralOverrides({}); };
   const toggleExclude = (id) => {
@@ -595,7 +647,7 @@ export default function App() {
             {["CHF", "EUR", "USD", "GBP"].map((c) => <option key={c}>{c}</option>)}
           </select>
           {hasData
-            ? <><Btn icon={RefreshCw} onClick={() => fileRef.current?.click()}>Replace</Btn><Btn icon={Trash2} onClick={clearAll}>Close</Btn></>
+            ? <><Btn icon={Download} onClick={exportToExcel}>Export</Btn><Btn icon={RefreshCw} onClick={() => fileRef.current?.click()}>Replace</Btn><Btn icon={Trash2} onClick={clearAll}>Close</Btn></>
             : <Btn onClick={loadSample}>Load sample</Btn>}
         </div>
       </div>
@@ -780,8 +832,8 @@ export default function App() {
                           style={{ width: 96, textAlign: "right", background: C.panelAlt, border: `1px solid ${breach ? C.red : C.line}`, color: breach ? C.red : C.text, fontFamily: MONO, fontSize: 12.5, padding: "6px 8px", outline: "none" }} />}
                         </td>
                         <td style={{ padding: "12px 16px", textAlign: "right", fontWeight: sh ? 600 : 400, color: sh ? C.text : C.dimmer }}>{sh ? fmt.money(sh * l.price) : "—"}</td>
-                        <td style={{ padding: "12px 16px", textAlign: "right", color: pct > 90 ? C.amber : C.dim }}>{sh ? `${pct.toFixed(1)}%` : "—"}</td>
-                        <td style={{ padding: "12px 16px", textAlign: "right", color: C.dim }}>{sh ? `${coll.toFixed(1)}%` : "—"}</td>
+                        <td style={{ padding: "12px 16px", textAlign: "right", color: pct > 90 ? C.amber : C.dim }}>{(sh || l.existingQty) ? `${pct.toFixed(1)}%` : "—"}</td>
+                        <td style={{ padding: "12px 16px", textAlign: "right", color: C.dim }}>{(sh || l.existingQty) ? `${coll.toFixed(1)}%` : "—"}</td>
                         <td style={{ padding: "8px 16px", textAlign: "right" }}>
                           <button onClick={() => toggleExclude(l.id)} style={{ background: ex ? C.blueBg : "transparent", border: `1px solid ${ex ? C.blue : C.line}`, color: ex ? "#cfe0ff" : C.dim, fontFamily: MONO, fontSize: 10, letterSpacing: 1, padding: "5px 10px", cursor: "pointer" }}>{ex ? "INCLUDE" : "EXCLUDE"}</button>
                         </td>
