@@ -73,6 +73,21 @@ function parseNum(v) {
   return Number.isFinite(n) ? n : NaN;
 }
 
+const SUPPORTED_CCY = ["CHF", "EUR", "USD", "GBP"];
+const CCY_TOKEN = /\b(CHF|EUR|USD|GBP)\b/i;
+const CCY_SYMBOL = { "€": "EUR", "£": "GBP", "$": "USD" };
+
+// Extrae un código de divisa de cualquier texto: "Price (EUR)" -> "EUR"
+function ccyFromText(v) {
+  const s = String(v ?? "");
+  const m = s.match(CCY_TOKEN);
+  if (m) return m[1].toUpperCase();
+  for (const sym of Object.keys(CCY_SYMBOL)) {
+    if (s.includes(sym)) return CCY_SYMBOL[sym];
+  }
+  return null;
+}
+
 const rowsFromSample = () =>
   SAMPLE.positions.map(([name, isin, qty, price], i) => ({ id: `${isin}-${i}`, name, isin, qty, price }));
 
@@ -139,6 +154,7 @@ export default function App() {
   const [rows, setRows] = useState([]);
   const [filename, setFilename] = useState("");
   const [ccy, setCcy] = useState("CHF");
+  const [ccyInfo, setCcyInfo] = useState(null); // { ccy, mixed, msg }
   const [excluded, setExcluded] = useState(new Set());
   const [proposals, setProposals] = useState({});
   const [dragOver, setDragOver] = useState(false);
@@ -204,7 +220,7 @@ export default function App() {
     ? (exposure < -params.absLimit ? "shortfall" : exposure > params.absLimit ? "excess" : null)
     : null;
 
-  const loadRows = (data, name) => {
+  const loadRows = (data, name, detected) => {
     const mapped = data.map((r, i) => {
       const nm = r.name ?? r.Security ?? r["Security name"] ?? r.SECURITY ?? "";
       const isin = r.isin ?? r.ISIN ?? "";
@@ -224,6 +240,18 @@ export default function App() {
     }).filter(Boolean);
     if (!mapped.length) { setError("No valid positions. Expected: Security · ISIN · Quantity · Price · Existing Collateral."); return; }
     setError(""); setRows(mapped); setFilename(name); setProposals({}); setExcluded(new Set()); setEngine("idle"); setExistingCollateralOverrides({});
+
+    if (detected?.mixed) {
+      setCcyInfo({
+        mixed: true,
+        msg: `Multiple currencies in file (${detected.all.join(", ")}) — no FX conversion applied. Select currency manually.`,
+      });
+    } else if (detected?.ccy) {
+      setCcy(detected.ccy);
+      setCcyInfo({ mixed: false, ccy: detected.ccy, msg: `auto-detected from file` });
+    } else {
+      setCcyInfo(null);
+    }
     const gs = mapped.filter((r) => r.qty < 0).reduce((a, r) => a + Math.abs(r.qty) * r.price, 0);
     setLoanValue(String(Math.round(gs * 100) / 100));
   };
@@ -242,6 +270,7 @@ export default function App() {
   const HEADER_PATTERNS = {
     existingCcy: /existing.*collateral.*ccy|existing.*ccy/i,
     existingQty: /existing.*collateral/i,
+    ccy: /^(ccy|currency|curr|divisa|moneda)$|^price\s*(ccy|currency)/i,
     isin: /^isin/i,
     qty: /^(qty|quantity|shares)/i,
     price: /^price/i,
@@ -254,6 +283,7 @@ export default function App() {
     // Orden importa: los patrones más específicos van primero.
     if (HEADER_PATTERNS.existingCcy.test(h)) return "existingCcy";
     if (HEADER_PATTERNS.existingQty.test(h)) return "existingQty";
+    if (HEADER_PATTERNS.ccy.test(h)) return "ccy";
     if (HEADER_PATTERNS.isin.test(h)) return "isin";
     if (HEADER_PATTERNS.qty.test(h)) return "qty";
     if (HEADER_PATTERNS.price.test(h)) return "price";
@@ -280,6 +310,49 @@ export default function App() {
 
   // Convierte una matriz cruda (array de arrays) en objetos {name, isin, qty, price, ...}
   // sin importar en qué fila esté el header ni el orden/nombre exacto de las columnas.
+  // Detecta la divisa del portfolio en 3 niveles de confianza.
+  function detectCurrency(rows2D, headerIdx, fieldByCol) {
+    const counts = {};
+    const bump = (c) => { if (c) counts[c] = (counts[c] || 0) + 1; };
+    const empty = () => Object.keys(counts).length === 0;
+
+    // Nivel 1: columna CCY explícita
+    const ccyCol = fieldByCol.indexOf("ccy");
+    if (ccyCol !== -1) {
+      for (let i = headerIdx + 1; i < rows2D.length; i++) {
+        bump(ccyFromText((rows2D[i] || [])[ccyCol]));
+      }
+    }
+
+    // Nivel 2: el header lo dice ("Price (EUR)")
+    if (empty()) {
+      for (const cell of rows2D[headerIdx] || []) bump(ccyFromText(cell));
+    }
+
+    // Nivel 3: los valores de price traen el prefijo ("CHF 328.20")
+    if (empty()) {
+      const priceCol = fieldByCol.indexOf("price");
+      if (priceCol !== -1) {
+        for (let i = headerIdx + 1; i < rows2D.length; i++) {
+          bump(ccyFromText((rows2D[i] || [])[priceCol]));
+        }
+      }
+    }
+
+    const found = Object.entries(counts)
+      .filter(([c]) => SUPPORTED_CCY.includes(c))
+      .sort((a, b) => b[1] - a[1]);
+
+    if (!found.length) return { ccy: null, mixed: false, all: [] };
+    return {
+      ccy: found[0][0],
+      mixed: found.length > 1,
+      all: found.map(([c, n]) => `${c} × ${n}`),
+    };
+  }
+
+  // Convierte una matriz cruda (array de arrays) en objetos {name, isin, qty, price, ...}
+  // sin importar en qué fila esté el header ni el orden/nombre exacto de las columnas.
   function rowsFromSheetArray(rows2D) {
     const headerIdx = findHeaderRow(rows2D);
     if (headerIdx === -1) return null;
@@ -291,7 +364,7 @@ export default function App() {
       fieldByCol.forEach((field, col) => { if (field) obj[field] = row[col]; });
       out.push(obj);
     }
-    return out;
+    return { rows: out, currency: detectCurrency(rows2D, headerIdx, fieldByCol) };
   }
 
   const handleFile = useCallback((file) => {
@@ -301,9 +374,9 @@ export default function App() {
       Papa.parse(file, {
         header: false, skipEmptyLines: true,
         complete: (res) => {
-          const mapped = rowsFromSheetArray(res.data);
-          if (!mapped) { setError("No se encontraron columnas ISIN/Quantity/Price en el CSV."); return; }
-          loadRows(mapped, file.name);
+          const parsed = rowsFromSheetArray(res.data);
+          if (!parsed) { setError("No se encontraron columnas ISIN/Quantity/Price en el CSV."); return; }
+          loadRows(parsed.rows, file.name, parsed.currency);
         },
         error: () => setError("Could not read CSV."),
       });
@@ -313,9 +386,9 @@ export default function App() {
         try {
           const wb = XLSX.read(e.target.result, { type: "array" });
           const arr2D = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: "" });
-          const mapped = rowsFromSheetArray(arr2D);
-          if (!mapped) { setError("No se encontraron columnas ISIN/Quantity/Price en el Excel."); return; }
-          loadRows(mapped, file.name);
+          const parsed = rowsFromSheetArray(arr2D);
+          if (!parsed) { setError("No se encontraron columnas ISIN/Quantity/Price en el Excel."); return; }
+          loadRows(parsed.rows, file.name, parsed.currency);
         } catch { setError("Could not read Excel."); }
       };
       reader.readAsArrayBuffer(file);
@@ -608,7 +681,7 @@ export default function App() {
   };
 
   const reset = () => { setProposals({}); setExcluded(new Set()); setEngine("idle"); setEngineMsg(""); };
-  const clearAll = () => { setRows([]); setFilename(""); setProposals({}); setExcluded(new Set()); setLoanValue(""); setError(""); setEngine("idle"); setExistingCollateralOverrides({}); };
+  const clearAll = () => { setRows([]); setFilename(""); setProposals({}); setExcluded(new Set()); setLoanValue(""); setError(""); setEngine("idle"); setExistingCollateralOverrides({}); setCcyInfo(null); };
   const toggleExclude = (id) => {
     const next = new Set(excluded);
     if (next.has(id)) next.delete(id);
@@ -643,9 +716,17 @@ export default function App() {
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           {hasData && <span style={{ color: C.text, fontSize: 12, marginRight: 6 }}>{filename}</span>}
-          <select value={ccy} onChange={(e) => setCcy(e.target.value)} style={{ background: C.panelAlt, color: C.text, border: `1px solid ${C.line}`, fontFamily: MONO, fontSize: 11, padding: "6px 8px" }}>
-            {["CHF", "EUR", "USD", "GBP"].map((c) => <option key={c}>{c}</option>)}
-          </select>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3 }}>
+            <select value={ccy} onChange={(e) => { setCcy(e.target.value); setCcyInfo(null); }}
+              style={{ background: C.panelAlt, color: C.text, border: `1px solid ${ccyInfo?.mixed ? C.red : ccyInfo ? C.green : C.line}`, fontFamily: MONO, fontSize: 11, padding: "6px 8px" }}>
+              {["CHF", "EUR", "USD", "GBP"].map((c) => <option key={c}>{c}</option>)}
+            </select>
+            {ccyInfo && (
+              <span style={{ color: ccyInfo.mixed ? C.red : C.dim, fontSize: 9, letterSpacing: 0.5, maxWidth: 260, textAlign: "right" }}>
+                {ccyInfo.msg}
+              </span>
+            )}
+          </div>
           {hasData
             ? <><Btn icon={Download} onClick={exportToExcel}>Export</Btn><Btn icon={RefreshCw} onClick={() => fileRef.current?.click()}>Replace</Btn><Btn icon={Trash2} onClick={clearAll}>Close</Btn></>
             : <Btn onClick={loadSample}>Load sample</Btn>}
