@@ -8,13 +8,20 @@ load_dotenv()
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from models import OptimizeRequest, OptimizeResponse, ProposedTransaction, ExecuteBreachRequest, BreachAlternativeRequest, ExecuteIssuerBreachRequest
+from models import (
+    OptimizeRequest,
+    OptimizeResponse,
+    ProposedTransaction,
+    ExecuteBreachRequest,
+    BreachAlternativeRequest,
+    ExecuteIssuerBreachRequest,
+)
 from optimizer import (
     optimize as run_optimizer,
     check_exposure_breach,
+    check_issuer_breach_pre_solve,
     propose_breach_resolution,
     propose_breach_alternative,
-    check_issuer_breach_pre_solve,
     propose_issuer_breach_resolution,
     NoValidBreachResolutionError,
 )
@@ -50,23 +57,31 @@ def history(limit: int = 20) -> dict:
 def optimize(req: OptimizeRequest) -> OptimizeResponse:
     r = req.rules
 
-    # --- Issuer limit breach (pre-solve, sobre existing collateral) ---
-    price_by_isin = {p.isin: p.price for p in req.positions}
+    # --- Issuer limit breach sobre el existing collateral (pre-solve) ---
+    # El solver ya evita AGREGAR colateral a un ISIN que pasó su cap
+    # (remaining_issuer_cap en optimize()), pero no puede deshacer lo que
+    # el AM ya tenía pignorado. Eso se resuelve con un recall explícito.
+    issuer_excesses = check_issuer_breach_pre_solve(req)
     name_by_isin = {p.isin: p.name for p in req.positions}
+    price_by_isin = {p.isin: p.price for p in req.positions}
 
-    issuer_breaches = check_issuer_breach_pre_solve(req)
-    issuer_breach_transactions = []
-    for isin, excess in issuer_breaches.items():
-        tx = propose_issuer_breach_resolution(
-            isin=isin,
-            excess_mv=excess,
-            price=price_by_isin[isin],
-            name=name_by_isin[isin],
-            lot_size=r.lot_size,
-        )
-        issuer_breach_transactions.append(tx)
+    issuer_breach_transactions: list[ProposedTransaction] = []
+    for isin, excess_mv in issuer_excesses.items():
+        try:
+            issuer_breach_transactions.append(
+                propose_issuer_breach_resolution(
+                    isin=isin,
+                    excess_mv=excess_mv,
+                    price=price_by_isin[isin],
+                    name=name_by_isin[isin],
+                    lot_size=r.lot_size,
+                    existing_shares=r.existing_collateral[isin],
+                )
+            )
+        except NoValidBreachResolutionError as e:
+            print(f"[API] issuer breach sin resolución para {isin}: {e}", flush=True)
 
-    # --- Optimizer (ya corre con el fix que descuenta existing collateral del cap) ---
+    # --- Optimizer ---
     result = run_optimizer(req)
 
     # --- AEL breach (post-solve, como ya estaba) ---
@@ -83,7 +98,10 @@ def optimize(req: OptimizeRequest) -> OptimizeResponse:
                 result.proposal, exposure, r.absolute_exposure_limit, r.lot_size, r.issuer_limit_pct
             )
         except NoValidBreachResolutionError as e:
-            raise HTTPException(status_code=422, detail=str(e))
+            raise HTTPException(
+                status_code=422,
+                detail={"error_code": "no_valid_breach_resolution", "message": str(e)}
+            )
 
     result.proposed_transactions = proposed_transactions
     result.fully_resolved = fully_resolved
@@ -130,9 +148,32 @@ def execute_breach_resolution(req: ExecuteBreachRequest):
 
 @app.post("/execute-issuer-breach-resolution")
 def execute_issuer_breach_resolution(req: ExecuteIssuerBreachRequest):
-    current_shares = req.existing_collateral.get(req.isin, 0)
-    new_shares = max(0, current_shares - req.shares_recalled)
+    current_shares = req.existing_collateral.get(req.isin)
+    if current_shares is None:
+        raise HTTPException(
+            status_code=422,
+            detail={"error_code": "isin_not_in_existing_collateral",
+                    "message": f"{req.isin} no tiene existing collateral para hacer recall."}
+        )
+    if req.shares_recalled <= 0:
+        raise HTTPException(
+            status_code=422,
+            detail={"error_code": "invalid_recall_amount",
+                    "message": "El recall debe ser mayor que cero."}
+        )
+    if req.shares_recalled > current_shares:
+        raise HTTPException(
+            status_code=422,
+            detail={"error_code": "recall_exceeds_existing",
+                    "message": f"El recall ({req.shares_recalled}) supera el existing "
+                               f"collateral de {req.isin} ({current_shares})."}
+        )
 
+    new_shares = current_shares - req.shares_recalled
+
+    # Dejamos la clave con 0 en vez de borrarla: el frontend lee
+    # updated_existing_collateral[isin] y un undefined rompería el payload
+    # del siguiente /optimize (Pydantic espera dict[str, int]).
     updated_existing_collateral = dict(req.existing_collateral)
     updated_existing_collateral[req.isin] = new_shares
 
@@ -146,10 +187,18 @@ def execute_issuer_breach_resolution(req: ExecuteIssuerBreachRequest):
     still_breached = issuer_cap is not None and new_mv > issuer_cap
     remaining_excess = round(max(0.0, new_mv - issuer_cap), 2) if issuer_cap is not None else 0.0
 
+    print(
+        f"[API] issuer breach — {req.isin} {current_shares} -> {new_shares} "
+        f"still_breached={still_breached} remaining_excess={remaining_excess}",
+        flush=True,
+    )
+
     return {
         "isin": req.isin,
         "updated_existing_collateral": updated_existing_collateral,
+        "recalled_market_value": round(req.shares_recalled * req.price, 2),
         "new_existing_mv": round(new_mv, 2),
+        "issuer_cap": round(issuer_cap, 2) if issuer_cap is not None else None,
         "still_breached": still_breached,
         "remaining_excess": remaining_excess,
     }

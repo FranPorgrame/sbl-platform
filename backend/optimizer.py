@@ -24,6 +24,8 @@ resultado ya calculado.
 """
 from __future__ import annotations
 
+import math
+
 from ortools.linear_solver import pywraplp
 
 from models import OptimizeRequest, OptimizeResponse, ProposedLine, ProposedTransaction
@@ -158,16 +160,30 @@ def propose_issuer_breach_resolution(
     price: float,
     name: str,
     lot_size: int,
+    existing_shares: int,
 ) -> "ProposedTransaction":
     """Recall mínimo (en lotes) para bajar ESTE ISIN puntual a su issuer cap.
     Mismo patrón de lotes que _greedy_recall, pero apuntado a un solo ISIN
-    en vez de a un exceso total del AEL."""
+    en vez de a un exceso total del AEL.
+
+    El recall nunca puede superar las acciones realmente pignoradas en ese
+    ISIN, y siempre es múltiplo del lot size.
+    """
     lot_value = price * lot_size
     if lot_value <= 0:
         raise NoValidBreachResolutionError(
             f"No se puede calcular un recall válido para {isin}: precio o lote inválido."
         )
-    lots_to_recall = math.ceil(excess_mv / lot_value)
+
+    lots_needed = math.ceil(excess_mv / lot_value)
+    lots_available = existing_shares // lot_size
+    lots_to_recall = min(lots_needed, lots_available)
+
+    if lots_to_recall <= 0:
+        raise NoValidBreachResolutionError(
+            f"No hay lotes completos disponibles en {isin} para resolver el issuer breach."
+        )
+
     shares_to_recall = lots_to_recall * lot_size
     mv_to_recall = shares_to_recall * price
 
@@ -176,8 +192,6 @@ def propose_issuer_breach_resolution(
         shares=shares_to_recall, market_value=round(mv_to_recall, 2),
     )
 
-
-import math
 
 class NoValidBreachResolutionError(Exception):
     """No recall combination was found that resolves the AEL 
@@ -338,7 +352,7 @@ def propose_breach_alternative(
     # ⚠️ CONFIRMAR: ¿los items de `proposal` son dicts (p["isin"]) u objetos (p.isin)?
     #    Ajustá _isin_of según lo que tengas.
     def _isin_of(p):
-        return p["isin"]        # <-- si es objeto, cambiá por: return p.isin
+        return p.isin        # <-- si es objeto, cambiá por: return p.isin
 
     all_isins = [_isin_of(p) for p in proposal]
 

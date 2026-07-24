@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useMemo, useRef, useCallback } from "react";
+import React, { useState, useMemo, useRef, useCallback, useEffect } from "react";
 import Papa from "papaparse";
 import * as XLSX from "xlsx";
 import { Upload, Zap, RotateCcw, Trash2, RefreshCw, Server, Wifi, WifiOff, Download } from "lucide-react";
@@ -131,12 +131,13 @@ const Card = ({ label, children, sub, accent }) => (
 );
 const Field = ({ label, value, onChange, width = 110, placeholder, numeric }) => (
   <div>
-    <div style={{ /* ...igual... */ }}>{label}</div>
+    <div style={{ color: C.dim, fontSize: 9, letterSpacing: 1.2, marginBottom: 6 }}>{label}</div>
     <input
       value={numeric && value !== "" ? Number(value).toLocaleString('en-US') : value}
       placeholder={placeholder}
       onChange={(e) => onChange(numeric ? e.target.value.replace(/,/g, '') : e.target.value)}
-      style={{ width, /* ...igual... */ }}
+      style={{ width, background: C.panelAlt, border: `1px solid ${C.line}`, color: C.text,
+        fontFamily: MONO, fontSize: 12.5, padding: "8px 10px", outline: "none" }}
     />
   </div>
 );
@@ -148,6 +149,79 @@ const Btn = ({ children, onClick, primary, disabled, icon: Icon }) => (
     {Icon && <Icon size={13} />} {children}
   </button>
 );
+
+// ---- Excel-like cell selection ------------------------------
+function useGridSelection(matrix) {
+  const [anchor, setAnchor] = useState(null); // {r, c}
+  const [focus, setFocus] = useState(null);   // {r, c}
+  const dragging = useRef(false);
+  const matrixRef = useRef(matrix);
+  matrixRef.current = matrix;
+
+  const rect = useMemo(() => {
+    if (!anchor || !focus) return null;
+    return {
+      r1: Math.min(anchor.r, focus.r), r2: Math.max(anchor.r, focus.r),
+      c1: Math.min(anchor.c, focus.c), c2: Math.max(anchor.c, focus.c),
+    };
+  }, [anchor, focus]);
+
+  const start = (r, c, e) => {
+    const tag = (e.target?.tagName || "").toLowerCase();
+    if (tag === "input" || tag === "button" || tag === "select") return; // no pisar la edición manual
+    if (e.shiftKey && anchor) { setFocus({ r, c }); return; }
+    dragging.current = true;
+    setAnchor({ r, c }); setFocus({ r, c });
+  };
+  const extend = (r, c) => { if (dragging.current) setFocus({ r, c }); };
+
+  useEffect(() => {
+    const up = () => { dragging.current = false; };
+    window.addEventListener("mouseup", up);
+    return () => window.removeEventListener("mouseup", up);
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e) => {
+      const tag = (e.target?.tagName || "").toLowerCase();
+      if (tag === "input" || tag === "textarea" || tag === "select") return;
+      if (e.key === "Escape") { setAnchor(null); setFocus(null); return; }
+      if (!rect) return;
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") {
+        e.preventDefault();
+        const m = matrixRef.current;
+        const lines = [];
+        for (let r = rect.r1; r <= rect.r2; r++) {
+          const cells = [];
+          for (let c = rect.c1; c <= rect.c2; c++) cells.push(m[r]?.[c] ?? "");
+          lines.push(cells.join("\t"));
+        }
+        const text = lines.join("\n");
+        if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).catch(() => {});
+        else {
+          const ta = document.createElement("textarea");
+          ta.value = text; document.body.appendChild(ta); ta.select();
+          document.execCommand("copy"); document.body.removeChild(ta);
+        }
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [rect]);
+
+  const selStyle = (r, c) => {
+    if (!rect) return null;
+    if (r < rect.r1 || r > rect.r2 || c < rect.c1 || c > rect.c2) return null;
+    const edges = [];
+    if (r === rect.r1) edges.push(`inset 0 1px 0 0 ${C.blue}`);
+    if (r === rect.r2) edges.push(`inset 0 -1px 0 0 ${C.blue}`);
+    if (c === rect.c1) edges.push(`inset 1px 0 0 0 ${C.blue}`);
+    if (c === rect.c2) edges.push(`inset -1px 0 0 0 ${C.blue}`);
+    return { background: "rgba(91,140,255,0.14)", boxShadow: edges.join(", ") || undefined };
+  };
+
+  return { start, extend, selStyle, clear: () => { setAnchor(null); setFocus(null); } };
+}
 
 // ============================================================
 export default function App() {
@@ -190,10 +264,10 @@ export default function App() {
     maxPct: parseNum(maxPct) || 100, lot,
   }), [loanValue, haircut, issuerLimit, absLimit, maxPct, lot]);
 
-  const longs = useMemo(() => rows.filter((r) => r.qty > 0).map((r) => ({ ...r, mv: r.qty * r.price })), [rows]);
-  const shorts = useMemo(() => rows.filter((r) => r.qty < 0).map((r) => ({ ...r, mv: Math.abs(r.qty) * r.price })), [rows]);
   const [existingCollateralOverrides, setExistingCollateralOverrides] = useState({});
 
+  // Existing collateral efectivo = lo que vino del Excel, sobrescrito por los
+  // recalls de issuer breach ya ejecutados. Única fuente de verdad.
   const existingCollateral = useMemo(() => {
     const dict = {};
     for (const r of rows) {
@@ -201,14 +275,21 @@ export default function App() {
     }
     return { ...dict, ...existingCollateralOverrides };
   }, [rows, existingCollateralOverrides]);
-  
-  const existingCollateralValue = useMemo(() => {
-    let total = 0;
-    for (const r of rows) {
-      if (r.qty > 0 && r.existingQty > 0) total += r.existingQty * r.price;
-    }
-    return total;
-  }, [rows]);
+
+  // longs ya trae el existingQty efectivo: la tabla, longMatrix, el export y
+  // existingCollateralValue leen todos de acá, así que se corrigen solos.
+  const longs = useMemo(() => rows.filter((r) => r.qty > 0).map((r) => ({
+    ...r,
+    existingQty: existingCollateral[r.isin] ?? 0,
+    mv: r.qty * r.price,
+  })), [rows, existingCollateral]);
+
+  const shorts = useMemo(() => rows.filter((r) => r.qty < 0).map((r) => ({ ...r, mv: Math.abs(r.qty) * r.price })), [rows]);
+
+  const existingCollateralValue = useMemo(
+    () => longs.reduce((a, l) => a + l.existingQty * l.price, 0),
+    [longs]
+  );
   const grossShort = useMemo(() => shorts.reduce((a, s) => a + s.mv, 0), [shorts]);
   const totalMV = useMemo(() => rows.reduce((a, r) => a + Math.abs(r.qty) * r.price, 0), [rows]);
   const neededGross = params.loanValue * (1 + params.haircut / 100);
@@ -396,14 +477,15 @@ export default function App() {
   }, []);
 
   // ---- AUTO-PROPOSE: calls the REAL backend ----------------
-  const autoPropose = async () => {
+  const autoPropose = async (existingOverride) => {
     setEngine("loading"); setEngineMsg("");
+    const existingForCall = existingOverride ?? existingCollateral;
     const payload = {
       positions: rows.map((r) => ({ name: r.name, isin: r.isin, quantity: r.qty, price: r.price })),
       rules: {
         loan_value: params.loanValue, haircut_pct: params.haircut, issuer_limit_pct: params.issuerLimit,
         absolute_exposure_limit: params.absLimit > 0 ? params.absLimit : null,
-        max_pct_of_shares: params.maxPct, lot_size: params.lot, existing_collateral: existingCollateral,
+        max_pct_of_shares: params.maxPct, lot_size: params.lot, existing_collateral: existingForCall,
       },
       currency: ccy,
     };
@@ -561,9 +643,12 @@ export default function App() {
           [tx.isin]: data.updated_existing_collateral[tx.isin],
         }));
 
-        setIssuerBreachInfo((b) => {
-          const remaining = b.transactions.filter((t) => t.isin !== tx.isin);
-          return remaining.length > 0 ? { ...b, transactions: remaining } : null;
+        // El recall baja el existing collateral -> el needed sube -> la proposal
+        // en pantalla queda obsoleta. Re-optimizamos con el dict ya actualizado
+        // en vez de parchear el estado a mano.
+        await autoPropose({
+          ...existingCollateral,
+          [tx.isin]: data.updated_existing_collateral[tx.isin],
         });
       } catch (e) {
         setIssuerBreachError("The issuer breach resolution could not be executed.");
@@ -699,6 +784,23 @@ export default function App() {
     if (lot > 0 && sh % lot !== 0) return "lot";
     return null;
   };
+
+  // Matriz de valores crudos del long book — el orden de columnas debe
+  // coincidir 1:1 con el <thead> de la tabla (índices 0..9; ACTION no se copia).
+  const longMatrix = useMemo(() => longs.map((l) => {
+    const sh = proposals[l.id] || 0;
+    const pct = l.qty > 0 ? ((sh + (l.existingQty || 0)) / l.qty) * 100 : 0;
+    const totalCollateralValue = provided + existingCollateralValue;
+    const rowCombinedValue = sh * l.price + (l.existingQty || 0) * l.price;
+    const coll = totalCollateralValue > 0 ? (rowCombinedValue / totalCollateralValue) * 100 : 0;
+    return [
+      l.name, l.isin, l.qty, l.price, l.mv,
+      l.existingQty || 0, sh, sh * l.price,
+      sh ? Number(pct.toFixed(1)) : 0, sh ? Number(coll.toFixed(1)) : 0,
+    ];
+  }), [longs, proposals, provided, existingCollateralValue]);
+
+  const grid = useGridSelection(longMatrix);
 
   const hasData = rows.length > 0;
   const covered = totalCollateral >= neededGross - 1e-6;
@@ -875,7 +977,7 @@ export default function App() {
               </div>
             </div>
             <div style={{ flex: 1 }} />
-            <Btn primary icon={Zap} onClick={autoPropose} disabled={engine === "loading"}>Optimize</Btn>
+            <Btn primary icon={Zap} onClick={() => autoPropose()} disabled={engine === "loading"}>Optimize</Btn>
             <Btn icon={RotateCcw} onClick={reset}>Reset</Btn>
             </div>
           </div>
@@ -886,35 +988,40 @@ export default function App() {
               <span>LONG POSITIONS</span><span>Proposed {fmt.money(provided)} / required {fmt.money(needed)}</span>
             </div>
             <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, userSelect: "none" }}>
                 <thead><tr style={{ color: C.dim, fontSize: 9, letterSpacing: 1 }}>
                   {["SECURITY", "ISIN", "QTY TOTAL", "PRICE", "MARKET VALUE", "EXISTING COLLATERAL (SHARES)", "PROPOSED TRANSACTIONS", "PROPOSED MV", "% POS", "% COLL", "ACTION"].map((h, i) => (
                     <th key={h} style={{ textAlign: i < 2 ? "left" : "right", padding: "10px 16px", fontWeight: 400, whiteSpace: "nowrap" }}>{h}</th>))}
                 </tr></thead>
                 <tbody>
-                  {longs.map((l) => {
+                  {longs.map((l, ri) => {
                     const ex = excluded.has(l.id); const sh = proposals[l.id] || 0;
                     const pct = l.qty > 0 ? ((sh + (l.existingQty || 0)) / l.qty) * 100 : 0; const breach = rowBreach(l);
                     const totalCollateralValue = provided + existingCollateralValue;
                     const rowCombinedValue = sh * l.price + (l.existingQty || 0) * l.price;
                     const coll = totalCollateralValue > 0 ? (rowCombinedValue / totalCollateralValue) * 100 : 0;
+                    const cell = (ci) => ({
+                      onMouseDown: (e) => grid.start(ri, ci, e),
+                      onMouseEnter: () => grid.extend(ri, ci),
+                    });
+                    const S = (ci, base) => ({ ...base, ...(grid.selStyle(ri, ci) || {}) });
                     return (
                       <tr key={l.id} className="rowh" style={{ borderTop: `1px solid ${C.lineSoft}`, opacity: ex ? 0.32 : 1 }}>
-                        <td style={{ padding: "12px 16px", fontWeight: 600 }}>{l.name}</td>
-                        <td style={{ padding: "12px 16px", color: C.dim }}>{l.isin}</td>
-                        <td style={{ padding: "12px 16px", textAlign: "right", color: C.dim }}>{fmt.int(l.qty)}</td>
-                        <td style={{ padding: "12px 16px", textAlign: "right", color: C.dim }}>{fmt.price(l.price)}</td>
-                        <td style={{ padding: "12px 16px", textAlign: "right" }}>{fmt.money(l.mv)}</td>
-                        <td style={{ padding: "12px 16px", textAlign: "right", color: l.existingQty > 0 ? C.text : C.dimmer }}>
+                        <td {...cell(0)} style={S(0, { padding: "12px 16px", fontWeight: 600 })}>{l.name}</td>
+                        <td {...cell(1)} style={S(1, { padding: "12px 16px", color: C.dim })}>{l.isin}</td>
+                        <td {...cell(2)} style={S(2, { padding: "12px 16px", textAlign: "right", color: C.dim })}>{fmt.int(l.qty)}</td>
+                        <td {...cell(3)} style={S(3, { padding: "12px 16px", textAlign: "right", color: C.dim })}>{fmt.price(l.price)}</td>
+                        <td {...cell(4)} style={S(4, { padding: "12px 16px", textAlign: "right" })}>{fmt.money(l.mv)}</td>
+                        <td {...cell(5)} style={S(5, { padding: "12px 16px", textAlign: "right", color: l.existingQty > 0 ? C.text : C.dimmer })}>
                             {l.existingQty > 0 ? fmt.int(l.existingQty) : "—"}
                         </td>
-                        <td style={{ padding: "8px 16px", textAlign: "right" }}>
+                        <td {...cell(6)} style={S(6, { padding: "8px 16px", textAlign: "right" })}>
                           {!ex && <input value={sh ? Number(sh).toLocaleString('en-US') : ""} onChange={(e) => editProposed(l.id, e.target.value.replace(/,/g, ''))}
                           style={{ width: 96, textAlign: "right", background: C.panelAlt, border: `1px solid ${breach ? C.red : C.line}`, color: breach ? C.red : C.text, fontFamily: MONO, fontSize: 12.5, padding: "6px 8px", outline: "none" }} />}
                         </td>
-                        <td style={{ padding: "12px 16px", textAlign: "right", fontWeight: sh ? 600 : 400, color: sh ? C.text : C.dimmer }}>{sh ? fmt.money(sh * l.price) : "—"}</td>
-                        <td style={{ padding: "12px 16px", textAlign: "right", color: pct > 90 ? C.amber : C.dim }}>{(sh || l.existingQty) ? `${pct.toFixed(1)}%` : "—"}</td>
-                        <td style={{ padding: "12px 16px", textAlign: "right", color: C.dim }}>{(sh || l.existingQty) ? `${coll.toFixed(1)}%` : "—"}</td>
+                        <td {...cell(7)} style={S(7, { padding: "12px 16px", textAlign: "right", fontWeight: sh ? 600 : 400, color: sh ? C.text : C.dimmer })}>{sh ? fmt.money(sh * l.price) : "—"}</td>
+                        <td {...cell(8)} style={S(8, { padding: "12px 16px", textAlign: "right", color: pct > 90 ? C.amber : C.dim })}>{(sh || l.existingQty) ? `${pct.toFixed(1)}%` : "—"}</td>
+                        <td {...cell(9)} style={S(9, { padding: "12px 16px", textAlign: "right", color: C.dim })}>{(sh || l.existingQty) ? `${coll.toFixed(1)}%` : "—"}</td>
                         <td style={{ padding: "8px 16px", textAlign: "right" }}>
                           <button onClick={() => toggleExclude(l.id)} style={{ background: ex ? C.blueBg : "transparent", border: `1px solid ${ex ? C.blue : C.line}`, color: ex ? "#cfe0ff" : C.dim, fontFamily: MONO, fontSize: 10, letterSpacing: 1, padding: "5px 10px", cursor: "pointer" }}>{ex ? "INCLUDE" : "EXCLUDE"}</button>
                         </td>
@@ -931,7 +1038,7 @@ export default function App() {
               <span>SHORT POSITIONS</span><span>Gross {fmt.money(grossShort)}</span>
             </div>
             <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, }}>
                 <thead><tr style={{ color: C.dim, fontSize: 9, letterSpacing: 1 }}>
                   {["SECURITY", "ISIN", "SHARES", "PRICE", "BORROW VALUE"].map((h, i) => (
                     <th key={h} style={{ textAlign: i < 2 ? "left" : "right", padding: "10px 16px", fontWeight: 400 }}>{h}</th>))}
