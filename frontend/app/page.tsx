@@ -150,15 +150,17 @@ const Btn = ({ children, onClick, primary, disabled, icon: Icon }) => (
   </button>
 );
 
-// ---- Excel-like cell selection ------------------------------
+// ---- Excel-like cell selection (multi-rango con Ctrl/Cmd + click) ----
 function useGridSelection(matrix) {
+  const [ranges, setRanges] = useState([]); // rectángulos ya confirmados
   const [anchor, setAnchor] = useState(null); // {r, c}
   const [focus, setFocus] = useState(null);   // {r, c}
   const dragging = useRef(false);
   const matrixRef = useRef(matrix);
   matrixRef.current = matrix;
 
-  const rect = useMemo(() => {
+  // Rectángulo que se está dibujando ahora mismo.
+  const active = useMemo(() => {
     if (!anchor || !focus) return null;
     return {
       r1: Math.min(anchor.r, focus.r), r2: Math.max(anchor.r, focus.r),
@@ -166,13 +168,40 @@ function useGridSelection(matrix) {
     };
   }, [anchor, focus]);
 
+  const allRects = useMemo(
+    () => (active ? [...ranges, active] : ranges),
+    [ranges, active]
+  );
+
+  // Ref para que el handler de teclado siempre lea la selección actual.
+  const rectsRef = useRef(allRects);
+  rectsRef.current = allRects;
+
+  const inRect = (r, c, x) => r >= x.r1 && r <= x.r2 && c >= x.c1 && c <= x.c2;
+  const isSel = useCallback(
+    (r, c) => allRects.some((x) => inRect(r, c, x)),
+    [allRects]
+  );
+
   const start = (r, c, e) => {
     const tag = (e.target?.tagName || "").toLowerCase();
     if (tag === "input" || tag === "button" || tag === "select") return; // no pisar la edición manual
+
+    const additive = e.ctrlKey || e.metaKey; // Ctrl en Windows, Cmd en Mac
+
     if (e.shiftKey && anchor) { setFocus({ r, c }); return; }
+
+    if (additive) {
+      // Congelamos el bloque actual y abrimos uno nuevo encima.
+      if (active) setRanges((prev) => [...prev, active]);
+    } else {
+      setRanges([]); // click limpio -> selección desde cero
+    }
+
     dragging.current = true;
     setAnchor({ r, c }); setFocus({ r, c });
   };
+
   const extend = (r, c) => { if (dragging.current) setFocus({ r, c }); };
 
   useEffect(() => {
@@ -185,18 +214,32 @@ function useGridSelection(matrix) {
     const onKey = (e) => {
       const tag = (e.target?.tagName || "").toLowerCase();
       if (tag === "input" || tag === "textarea" || tag === "select") return;
-      if (e.key === "Escape") { setAnchor(null); setFocus(null); return; }
-      if (!rect) return;
+      if (e.key === "Escape") { setRanges([]); setAnchor(null); setFocus(null); return; }
+
+      const rects = rectsRef.current;
+      if (!rects.length) return;
+
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") {
         e.preventDefault();
         const m = matrixRef.current;
+
+        // Caja envolvente de todos los bloques seleccionados.
+        const r1 = Math.min(...rects.map((x) => x.r1));
+        const r2 = Math.max(...rects.map((x) => x.r2));
+        const c1 = Math.min(...rects.map((x) => x.c1));
+        const c2 = Math.max(...rects.map((x) => x.c2));
+
         const lines = [];
-        for (let r = rect.r1; r <= rect.r2; r++) {
+        for (let r = r1; r <= r2; r++) {
           const cells = [];
-          for (let c = rect.c1; c <= rect.c2; c++) cells.push(m[r]?.[c] ?? "");
+          for (let c = c1; c <= c2; c++) {
+            const selected = rects.some((x) => inRect(r, c, x));
+            cells.push(selected ? (m[r]?.[c] ?? "") : "");
+          }
           lines.push(cells.join("\t"));
         }
         const text = lines.join("\n");
+
         if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).catch(() => {});
         else {
           const ta = document.createElement("textarea");
@@ -207,20 +250,21 @@ function useGridSelection(matrix) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [rect]);
+  }, []);
 
+  // El borde se dibuja solo contra vecinos NO seleccionados: así dos bloques
+  // pegados se ven como un único contorno, igual que en Excel.
   const selStyle = (r, c) => {
-    if (!rect) return null;
-    if (r < rect.r1 || r > rect.r2 || c < rect.c1 || c > rect.c2) return null;
+    if (!isSel(r, c)) return null;
     const edges = [];
-    if (r === rect.r1) edges.push(`inset 0 1px 0 0 ${C.blue}`);
-    if (r === rect.r2) edges.push(`inset 0 -1px 0 0 ${C.blue}`);
-    if (c === rect.c1) edges.push(`inset 1px 0 0 0 ${C.blue}`);
-    if (c === rect.c2) edges.push(`inset -1px 0 0 0 ${C.blue}`);
+    if (!isSel(r - 1, c)) edges.push(`inset 0 1px 0 0 ${C.blue}`);
+    if (!isSel(r + 1, c)) edges.push(`inset 0 -1px 0 0 ${C.blue}`);
+    if (!isSel(r, c - 1)) edges.push(`inset 1px 0 0 0 ${C.blue}`);
+    if (!isSel(r, c + 1)) edges.push(`inset -1px 0 0 0 ${C.blue}`);
     return { background: "rgba(91,140,255,0.14)", boxShadow: edges.join(", ") || undefined };
   };
 
-  return { start, extend, selStyle, clear: () => { setAnchor(null); setFocus(null); } };
+  return { start, extend, selStyle, clear: () => { setRanges([]); setAnchor(null); setFocus(null); } };
 }
 
 // ============================================================
