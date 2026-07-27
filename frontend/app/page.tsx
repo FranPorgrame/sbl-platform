@@ -530,6 +530,7 @@ export default function App() {
         loan_value: params.loanValue, haircut_pct: params.haircut, issuer_limit_pct: params.issuerLimit,
         absolute_exposure_limit: params.absLimit > 0 ? params.absLimit : null,
         max_pct_of_shares: params.maxPct, lot_size: params.lot, existing_collateral: existingForCall,
+        excluded_isins: longs.filter((l) => excluded.has(l.id)).map((l) => l.isin),
       },
       currency: ccy,
     };
