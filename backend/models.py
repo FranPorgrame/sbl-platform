@@ -33,6 +33,7 @@ class Rules(BaseModel):
     max_pct_of_shares: float = Field(default=100, ge=0, le=100)
     lot_size: int = Field(default=1, ge=1)
     existing_collateral: dict[str, int] = Field(default_factory=dict)
+    excluded_isins: list[str] = Field(default_factory=list)
 
 
 from pydantic import BaseModel, model_validator
