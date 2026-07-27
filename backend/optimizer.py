@@ -51,8 +51,13 @@ def optimize(req: OptimizeRequest) -> OptimizeResponse:
     if solver is None:
         raise RuntimeError("OR-Tools CBC solver no disponible")
 
+    excluded = set(r.excluded_isins)
+
     lot_vars: dict[str, object] = {}
     for p in longs:
+        if p.isin in excluded:
+            continue  # el AM no quiere pignorar NUEVAS shares de este ISIN
+
         existing_shares_this_isin = r.existing_collateral.get(p.isin, 0)
 
         # Cota superior de lotes: el mínimo entre lo que permite cada regla.
@@ -71,7 +76,6 @@ def optimize(req: OptimizeRequest) -> OptimizeResponse:
         if max_lots <= 0:
             continue
         lot_vars[p.isin] = solver.IntVar(0, max_lots, f"lots_{p.isin}")
-
     price_by_isin = {p.isin: p.price for p in longs}
     qty_by_isin = {p.isin: p.quantity for p in longs}
     name_by_isin = {p.isin: p.name for p in longs}

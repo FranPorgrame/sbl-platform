@@ -717,6 +717,7 @@ export default function App() {
           max_pct_of_shares: params.maxPct,
           lot_size: params.lot,
           existing_collateral: existingCollateral,
+          excluded_isins: longs.filter((l) => excluded.has(l.id)).map((l) => l.isin),
         },
         collateral_needed: breachInfo.collateralNeeded,
         collateral_provided: breachInfo.collateralProvided,
