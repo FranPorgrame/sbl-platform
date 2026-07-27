@@ -53,13 +53,20 @@ def optimize(req: OptimizeRequest) -> OptimizeResponse:
 
     lot_vars: dict[str, object] = {}
     for p in longs:
+        existing_shares_this_isin = r.existing_collateral.get(p.isin, 0)
+
         # Cota superior de lotes: el mínimo entre lo que permite cada regla.
-        caps_shares = [p.quantity * (r.max_pct_of_shares / 100)]
+        # max_pct se aplica sobre el total pignorado (existing + nuevo), así que
+        # las shares NUEVAS disponibles son el tope menos lo ya comprometido.
+        max_new_shares_by_pct = p.quantity * (r.max_pct_of_shares / 100) - existing_shares_this_isin
+        caps_shares = [max_new_shares_by_pct]
+
         if issuer_cap is not None:
-            existing_mv_this_isin = r.existing_collateral.get(p.isin, 0) * p.price
+            existing_mv_this_isin = existing_shares_this_isin * p.price
             remaining_issuer_cap = max(0.0, issuer_cap - existing_mv_this_isin)
             caps_shares.append(remaining_issuer_cap / p.price)
-        max_shares = min(caps_shares)
+
+        max_shares = max(0.0, min(caps_shares))
         max_lots = int(max_shares // lot)
         if max_lots <= 0:
             continue

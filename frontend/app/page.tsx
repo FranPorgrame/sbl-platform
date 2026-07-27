@@ -785,7 +785,7 @@ export default function App() {
     // Hoja 2: Long Positions — mismas columnas que la tabla en pantalla
     const longHeader = [
       "Security", "ISIN", "Qty Total", "Price", "Market Value",
-      "Existing Collateral (Shares)", "Proposed Transactions", "Proposed MV", "% Pos", "% Coll",
+      "Existing Collateral (Shares)", "Existing MV", "Proposed Transactions", "Proposed MV", "% Pos", "% Coll",
     ];
     const longRows = longs.map((l) => {
       const sh = proposals[l.id] || 0;
@@ -794,7 +794,8 @@ export default function App() {
       const coll = totalCollateral > 0 ? (rowCombinedValue / totalCollateral) * 100 : 0;
       return [
         l.name, l.isin, l.qty, l.price, Math.round(l.mv),
-        l.existingQty || 0, sh, sh ? Math.round(sh * l.price) : 0,
+        l.existingQty || 0, Math.round((l.existingQty || 0) * l.price),
+        sh, sh ? Math.round(sh * l.price) : 0,
         sh ? Number(pct.toFixed(1)) : 0, sh ? Number(coll.toFixed(1)) : 0,
       ];
     });
@@ -821,10 +822,11 @@ export default function App() {
 
   const rowBreach = (l) => {
     const sh = proposals[l.id] || 0; if (!sh) return null;
+    const totalPledgedShares = sh + (l.existingQty || 0);
+    const totalPledgedMV = totalPledgedShares * l.price;
     const issuerCapMV = params.issuerLimit > 0 ? (params.issuerLimit / 100) * neededGross : Infinity;
-    const absCap = params.absLimit > 0 ? params.absLimit : Infinity;
-    if (sh * l.price > Math.min(issuerCapMV, absCap) + 1) return "issuer";
-    if (sh > l.qty * (params.maxPct / 100) + 0.5) return "shares";
+    if (totalPledgedMV > issuerCapMV + 1) return "issuer";
+    if (totalPledgedShares > l.qty * (params.maxPct / 100) + 0.5) return "shares";
     if (lot > 0 && sh % lot !== 0) return "lot";
     return null;
   };
@@ -837,9 +839,10 @@ export default function App() {
     const totalCollateralValue = provided + existingCollateralValue;
     const rowCombinedValue = sh * l.price + (l.existingQty || 0) * l.price;
     const coll = totalCollateralValue > 0 ? (rowCombinedValue / totalCollateralValue) * 100 : 0;
+    const existingMV = (l.existingQty || 0) * l.price;
     return [
       l.name, l.isin, l.qty, l.price, l.mv,
-      l.existingQty || 0, sh, sh * l.price,
+      l.existingQty || 0, existingMV, sh, sh * l.price,
       sh ? Number(pct.toFixed(1)) : 0, sh ? Number(coll.toFixed(1)) : 0,
     ];
   }), [longs, proposals, provided, existingCollateralValue]);
@@ -1034,7 +1037,7 @@ export default function App() {
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, userSelect: "none" }}>
                 <thead><tr style={{ color: C.dim, fontSize: 9, letterSpacing: 1 }}>
-                  {["SECURITY", "ISIN", "QTY TOTAL", "PRICE", "MARKET VALUE", "EXISTING COLLATERAL (SHARES)", "PROPOSED TRANSACTIONS", "PROPOSED MV", "% POS", "% COLL", "ACTION"].map((h, i) => (
+                  {["SECURITY", "ISIN", "QTY TOTAL", "PRICE", "MARKET VALUE", "EXISTING COLLATERAL (SHARES)", "EXISTING MV", "PROPOSED TRANSACTIONS", "PROPOSED MV", "% POS", "% COLL", "ACTION"].map((h, i) => (
                     <th key={h} style={{ textAlign: i < 2 ? "left" : "right", padding: "10px 16px", fontWeight: 400, whiteSpace: "nowrap" }}>{h}</th>))}
                 </tr></thead>
                 <tbody>
@@ -1044,6 +1047,7 @@ export default function App() {
                     const totalCollateralValue = provided + existingCollateralValue;
                     const rowCombinedValue = sh * l.price + (l.existingQty || 0) * l.price;
                     const coll = totalCollateralValue > 0 ? (rowCombinedValue / totalCollateralValue) * 100 : 0;
+                    const existingMV = (l.existingQty || 0) * l.price;
                     const cell = (ci) => ({
                       onMouseDown: (e) => grid.start(ri, ci, e),
                       onMouseEnter: () => grid.extend(ri, ci),
@@ -1059,13 +1063,16 @@ export default function App() {
                         <td {...cell(5)} style={S(5, { padding: "12px 16px", textAlign: "right", color: l.existingQty > 0 ? C.text : C.dimmer })}>
                             {l.existingQty > 0 ? fmt.int(l.existingQty) : "—"}
                         </td>
-                        <td {...cell(6)} style={S(6, { padding: "8px 16px", textAlign: "right" })}>
+                        <td {...cell(6)} style={S(6, { padding: "12px 16px", textAlign: "right", color: l.existingQty > 0 ? C.text : C.dimmer })}>
+                            {l.existingQty > 0 ? fmt.money(existingMV) : "—"}
+                        </td>
+                        <td {...cell(7)} style={S(7, { padding: "8px 16px", textAlign: "right" })}>
                           {!ex && <input value={sh ? Number(sh).toLocaleString('en-US') : ""} onChange={(e) => editProposed(l.id, e.target.value.replace(/,/g, ''))}
                           style={{ width: 96, textAlign: "right", background: C.panelAlt, border: `1px solid ${breach ? C.red : C.line}`, color: breach ? C.red : C.text, fontFamily: MONO, fontSize: 12.5, padding: "6px 8px", outline: "none" }} />}
                         </td>
-                        <td {...cell(7)} style={S(7, { padding: "12px 16px", textAlign: "right", fontWeight: sh ? 600 : 400, color: sh ? C.text : C.dimmer })}>{sh ? fmt.money(sh * l.price) : "—"}</td>
-                        <td {...cell(8)} style={S(8, { padding: "12px 16px", textAlign: "right", color: pct > 90 ? C.amber : C.dim })}>{(sh || l.existingQty) ? `${pct.toFixed(1)}%` : "—"}</td>
-                        <td {...cell(9)} style={S(9, { padding: "12px 16px", textAlign: "right", color: C.dim })}>{(sh || l.existingQty) ? `${coll.toFixed(1)}%` : "—"}</td>
+                        <td {...cell(8)} style={S(8, { padding: "12px 16px", textAlign: "right", fontWeight: sh ? 600 : 400, color: sh ? C.text : C.dimmer })}>{sh ? fmt.money(sh * l.price) : "—"}</td>
+                        <td {...cell(9)} style={S(9, { padding: "12px 16px", textAlign: "right", color: pct > 90 ? C.amber : C.dim })}>{(sh || l.existingQty) ? `${pct.toFixed(1)}%` : "—"}</td>
+                        <td {...cell(10)} style={S(10, { padding: "12px 16px", textAlign: "right", color: C.dim })}>{(sh || l.existingQty) ? `${coll.toFixed(1)}%` : "—"}</td>
                         <td style={{ padding: "8px 16px", textAlign: "right" }}>
                           <button onClick={() => toggleExclude(l.id)} style={{ background: ex ? C.blueBg : "transparent", border: `1px solid ${ex ? C.blue : C.line}`, color: ex ? "#cfe0ff" : C.dim, fontFamily: MONO, fontSize: 10, letterSpacing: 1, padding: "5px 10px", cursor: "pointer" }}>{ex ? "INCLUDE" : "EXCLUDE"}</button>
                         </td>
