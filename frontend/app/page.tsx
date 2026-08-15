@@ -500,7 +500,7 @@ export default function App() {
         header: false, skipEmptyLines: true,
         complete: (res) => {
           const parsed = rowsFromSheetArray(res.data);
-          if (!parsed) { setError("No se encontraron columnas ISIN/Quantity/Price en el CSV."); return; }
+          if (!parsed) { setError("No ISIN/Quantity/Price columns were found in the CSV."); return; }
           loadRows(parsed.rows, file.name, parsed.currency);
         },
         error: () => setError("Could not read CSV."),
@@ -510,10 +510,21 @@ export default function App() {
       reader.onload = (e) => {
         try {
           const wb = XLSX.read(e.target.result, { type: "array" });
-          const arr2D = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: "" });
-          const parsed = rowsFromSheetArray(arr2D);
-          if (!parsed) { setError("No se encontraron columnas ISIN/Quantity/Price en el Excel."); return; }
-          loadRows(parsed.rows, file.name, parsed.currency);
+
+          // El portfolio puede estar en cualquier hoja (ej. "Portfolio" en la 3ra,
+          // con "Summary"/"Assumptions" delante). Recorremos TODAS y nos quedamos
+          // con la que tenga un header válido y MÁS filas con ISIN reconocido.
+          let best = null;
+          for (const sheetName of wb.SheetNames) {
+            const arr2D = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, defval: "" });
+            const parsed = rowsFromSheetArray(arr2D);
+            if (!parsed) continue;
+            const validCount = parsed.rows.filter((r) => String(r.isin ?? "").trim()).length;
+            if (!best || validCount > best.validCount) best = { ...parsed, validCount };
+          }
+
+          if (!best) { setError("No se encontraron columnas ISIN/Quantity/Price en ninguna hoja del Excel."); return; }
+          loadRows(best.rows, file.name, best.currency);
         } catch { setError("Could not read Excel."); }
       };
       reader.readAsArrayBuffer(file);
