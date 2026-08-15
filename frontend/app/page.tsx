@@ -523,7 +523,7 @@ export default function App() {
             if (!best || validCount > best.validCount) best = { ...parsed, validCount };
           }
 
-          if (!best) { setError("No se encontraron columnas ISIN/Quantity/Price en ninguna hoja del Excel."); return; }
+          if (!best) { setError("No ISIN/Quantity/Price columns were found in any Excel sheet."); return; }
           loadRows(best.rows, file.name, best.currency);
         } catch { setError("Could not read Excel."); }
       };
