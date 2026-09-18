@@ -868,13 +868,16 @@ export default function App() {
 
   return (
     <div style={{ background: C.bg, minHeight: "100vh", fontFamily: MONO, color: C.text, padding: 20 }}>
-      <style>{`input::placeholder{color:${C.dimmer}}*{box-sizing:border-box}.rowh:hover{background:${C.lineSoft}}::-webkit-scrollbar{height:8px;width:8px}::-webkit-scrollbar-thumb{background:${C.line}}`}</style>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600&display=swap');input::placeholder{color:${C.dimmer}}*{box-sizing:border-box}.rowh:hover{background:${C.lineSoft}}::-webkit-scrollbar{height:8px;width:8px}::-webkit-scrollbar-thumb{background:${C.line}}`}</style>
 
       {/* Top bar */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: C.panel, border: `1px solid ${C.line}`, padding: "14px 20px", marginBottom: 16 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <div style={{ width: 26, height: 26, border: `1px solid ${C.dim}`, display: "grid", placeItems: "center", fontSize: 13 }}>❋</div>
-          <span style={{ letterSpacing: 3, fontSize: 13 }}>SECURITIES LENDING AND BORROWING</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 13 }}>
+          <img src="/sba-logo.png" alt="SBA" style={{ height: 26, width: "auto", display: "block" }} />
+          <div>
+            <div style={{ fontFamily: "'Playfair Display', serif", fontWeight: 600, fontSize: 20, letterSpacing: 4, lineHeight: 1 }}>SBA</div>
+            <div style={{ fontSize: 8, letterSpacing: 2.2, color: C.dim, marginTop: 3 }}>SECURITIES BORROWING AUTOMATION</div>
+          </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           {hasData && <span style={{ color: C.text, fontSize: 12, marginRight: 6 }}>{filename}</span>}
