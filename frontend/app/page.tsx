@@ -25,7 +25,7 @@ const MONO = "'IBM Plex Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace";
 
 // ---- Sample data (Swiss equities, from the beta) -----------
 const SAMPLE = {
-  filename: "Collateral_130_30.xlsx", loanValue: 64985360.18, haircut: 30,
+  filename: "Demo_Portfolio", loanValue: 64985360.18, haircut: 30,
   issuerLimit: 25, absLimit: "", maxPct: 100, lot: 100,
   positions: [
     ["ROCHE HOLDINGS (GENUSSCHEINE)", "CH0012032048", 142096, 328.2],
@@ -873,7 +873,6 @@ export default function App() {
       {/* Top bar */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: C.panel, border: `1px solid ${C.line}`, padding: "14px 20px", marginBottom: 16 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 13 }}>
-          <img src="/sba-logo.png" alt="SBA" style={{ height: 26, width: "auto", display: "block" }} />
           <div>
             <div style={{ fontFamily: "'Playfair Display', serif", fontWeight: 600, fontSize: 20, letterSpacing: 4, lineHeight: 1 }}>SBA</div>
             <div style={{ fontSize: 8, letterSpacing: 2.2, color: C.dim, marginTop: 3 }}>SECURITIES BORROWING AUTOMATION</div>
